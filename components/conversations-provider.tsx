@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '@/components/account-state'
 import { createConversation, createMessage, deleteConversation, listConversations, listMessages, updateConversation } from '@/lib/supabase/intelligence'
 import type { Tables, TablesInsert, TablesUpdate } from '@/lib/supabase/types'
@@ -28,16 +28,36 @@ export function ConversationsProvider({ children }: { children: React.ReactNode 
   const [activeConversation, setActiveConversation] = useState<Tables<'ai_conversations'> | null>(null)
   const [messages, setMessages] = useState<Tables<'ai_messages'>[]>([])
   const [loading, setLoading] = useState(false)
+  const requestGeneration = useRef(0)
+
+  useEffect(() => {
+    if (user) return
+    requestGeneration.current += 1
+    setProjectId(null)
+    setConversations([])
+    setActiveConversation(null)
+    setMessages([])
+    setLoading(false)
+  }, [user])
 
   const loadProjectConversations = useCallback(async (nextProjectId: string) => {
+    const generation = ++requestGeneration.current
     setLoading(true)
+    setProjectId(nextProjectId)
+    setConversations([])
+    setActiveConversation(null)
+    setMessages([])
     try {
-      setProjectId(nextProjectId)
-      setConversations(await listConversations(nextProjectId))
-      setActiveConversation(null)
-      setMessages([])
+      const nextConversations = await listConversations(nextProjectId)
+      const nextActiveConversation = nextConversations[0] ?? null
+      const nextMessages = nextActiveConversation ? await listMessages(nextActiveConversation.id) : []
+      if (generation === requestGeneration.current) {
+        setConversations(nextConversations)
+        setActiveConversation(nextActiveConversation)
+        setMessages(nextMessages)
+      }
     } finally {
-      setLoading(false)
+      if (generation === requestGeneration.current) setLoading(false)
     }
   }, [])
 
@@ -52,12 +72,15 @@ export function ConversationsProvider({ children }: { children: React.ReactNode 
   }, [user])
 
   const selectConversation = useCallback(async (conversation: Tables<'ai_conversations'>) => {
+    const generation = ++requestGeneration.current
     setLoading(true)
+    setActiveConversation(conversation)
+    setMessages([])
     try {
-      setActiveConversation(conversation)
-      setMessages(await listMessages(conversation.id))
+      const nextMessages = await listMessages(conversation.id)
+      if (generation === requestGeneration.current) setMessages(nextMessages)
     } finally {
-      setLoading(false)
+      if (generation === requestGeneration.current) setLoading(false)
     }
   }, [])
 

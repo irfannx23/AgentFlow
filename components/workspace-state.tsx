@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAuth } from '@/components/account-state'
 import { supabase } from '@/lib/supabase/client'
 import type { Tables } from '@/lib/supabase/types'
+import { useBilling } from '@/components/billing-provider'
 
 export type Project = {
   id: string
@@ -13,6 +14,10 @@ export type Project = {
   organizationId: string | null
   createdAt: string
   updatedAt: string
+}
+
+export class ProjectLimitError extends Error {
+  constructor() { super('You have reached the Free plan limit of 3 projects.'); this.name = 'ProjectLimitError' }
 }
 
 type Workspace = Pick<Tables<'organizations'>, 'id' | 'name'>
@@ -51,6 +56,7 @@ function workspaceName(displayName: string) {
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const { user, account } = useAuth()
+  const { plan, entitlements, refresh: refreshBilling } = useBilling()
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>([])
@@ -85,7 +91,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       .eq('organization_id', workspaceId)
       .order('updated_at', { ascending: false })
     if (projectsError) throw projectsError
-    setProjects((data ?? []).map(toProject))
+    return (data ?? []).map(toProject)
   }, [])
 
   useEffect(() => {
@@ -110,12 +116,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         })
         if (profileError) throw profileError
 
-        let { data: personalWorkspace, error: workspaceError } = await supabase
+        const workspaceResult = await supabase
           .from('organizations')
           .select('id,name')
           .eq('owner_id', user.uid)
           .eq('is_personal', true)
           .maybeSingle()
+        let personalWorkspace = workspaceResult.data
+        const workspaceError = workspaceResult.error
         if (workspaceError) throw workspaceError
 
         if (!personalWorkspace) {
@@ -142,7 +150,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
         if (!active) return
         setWorkspace(personalWorkspace)
-        await loadProjectsFor(personalWorkspace.id)
+        const nextProjects = await loadProjectsFor(personalWorkspace.id)
+        if (active) {
+          setProjects(nextProjects)
+          void refreshBilling()
+        }
       } catch (initializationError) {
         if (!active) return
         setError(initializationError instanceof Error ? initializationError.message : 'Unable to load your workspace.')
@@ -152,27 +164,38 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
     void initialize()
     return () => { active = false }
-  }, [account.email, account.name, account.photoURL, loadProjectsFor, user])
+  }, [account.email, account.name, account.photoURL, loadProjectsFor, refreshBilling, user])
 
   const reloadProjects = useCallback(async () => {
     if (!workspace) return
-    await loadProjectsFor(workspace.id)
+    setProjects(await loadProjectsFor(workspace.id))
   }, [loadProjectsFor, workspace])
 
   const createProject = useCallback(async (input: ProjectInput) => {
-    if (!user || !workspace) throw new Error('Sign in to create a project.')
+    if (!user || !workspace) throw new Error('Sign in to create an automation project.')
+    if ((plan === 'free' && projects.length >= 3) || !entitlements.canCreateProject) {
+      window.dispatchEvent(new CustomEvent('agentflow:upgrade-required', { detail: { reason: 'project-limit' } }))
+      throw new ProjectLimitError()
+    }
     const { data, error: createError } = await supabase.from('projects').insert({
       owner_id: user.uid,
       organization_id: workspace.id,
       name: input.name,
       description: input.description || null,
-      stage: input.phase ?? 'Idea',
+      stage: input.phase ?? 'Business Problem',
     }).select('*').single()
-    if (createError) throw createError
+    if (createError) {
+      if (createError.message.includes('FREE_PROJECT_LIMIT_REACHED')) {
+        window.dispatchEvent(new CustomEvent('agentflow:upgrade-required', { detail: { reason: 'project-limit' } }))
+        throw new ProjectLimitError()
+      }
+      throw createError
+    }
     const project = toProject(data)
     setProjects(current => [project, ...current])
+    void refreshBilling()
     return project
-  }, [user, workspace])
+  }, [entitlements.canCreateProject, plan, projects.length, refreshBilling, user, workspace])
 
   const updateProject = useCallback(async (id: string, input: Partial<ProjectInput>) => {
     const values: { name?: string; description?: string | null; stage?: string } = {}
@@ -190,12 +213,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     const { error: deleteError } = await supabase.from('projects').delete().eq('id', id)
     if (deleteError) throw deleteError
     setProjects(current => current.filter(project => project.id !== id))
+    void refreshBilling()
     setRecentProjectIds(current => {
       const next = current.filter(projectId => projectId !== id)
       if (user) window.localStorage.setItem(`orbisweave:recent-projects:${user.uid}`, JSON.stringify(next))
       return next
     })
-  }, [user])
+  }, [refreshBilling, user])
 
   const recentProjects = useMemo(() => {
     const ordered = recentProjectIds.map(id => projects.find(project => project.id === id)).filter((project): project is Project => Boolean(project))

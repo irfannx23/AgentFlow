@@ -4,23 +4,45 @@
 @import 'shadcn/tailwind.css';
 
 :root {
-  --ink: #0b0f14;
-  --paper: #f4fff6;
-  --lime: #c0ff3e;
-  --blue: #4361ee;
-  --muted: #788492;
-  --line: rgba(11, 15, 20, .14);
+  --ink: #182019;
+  --paper: #f7f8f4;
+  --lime: #9ee629;
+  --blue: #5269d8;
+  --muted: #69736b;
+  --line: rgba(35, 47, 37, .11);
 }
+
+.home-ai-response {
+  width: min(760px, calc(100vw - 48px));
+  max-height: 240px;
+  margin: 14px auto 0;
+  padding: 16px 18px;
+  overflow: auto;
+  border: 1px solid rgba(35, 47, 37, .1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .78);
+  color: #263028;
+  box-shadow: 0 18px 45px rgba(51, 65, 54, .08);
+  backdrop-filter: blur(20px);
+  text-align: left;
+}
+
+.home-ai-response p { margin: 0; white-space: pre-wrap; }
+.citation-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.citation-list span { padding: 5px 8px; border: 1px solid rgba(112, 164, 31, .18); border-radius: 999px; color: #5f6b61; font-size: 11px; }
+.send-button:disabled { cursor: not-allowed; opacity: .45; }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; height:100%; overflow:hidden; }
-body { margin: 0; height:100%; overflow:hidden; background: #080a0d; color: #f4fff6; font-family: 'Space Grotesk', sans-serif; }
+body { margin: 0; height:100%; overflow:hidden; background: #f4f5f1; color: #182019; font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 @media (max-width: 720px) {
   html, body { height:auto; overflow-y:auto; }
 }
 a { color: inherit; text-decoration: none; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid rgba(126, 190, 28, .24); outline-offset: 2px; }
+.auth-brand img { width: 42px; height: 42px; object-fit: contain; }
 
 @layer base {
   * { border-color: var(--line); }

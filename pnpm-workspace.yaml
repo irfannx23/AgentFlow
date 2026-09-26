@@ -6,4 +6,6 @@ minimumReleaseAgeExclude:
 
 allowBuilds:
   '@firebase/util': true
+  esbuild: true
   protobufjs: true
+  unrs-resolver: true

@@ -69,24 +69,6 @@ export async function listKnowledgeChunks(projectId: string) {
   return result.data ?? []
 }
 
-export async function replaceKnowledgeChunks(documentId: string, projectId: string, ownerId: string, chunks: Array<{ content: string; tokenCount?: number; metadata?: Json }>) {
-  const removed = await supabase.from('knowledge_chunks').delete().eq('document_id', documentId)
-  throwIfError(removed.error)
-  if (!chunks.length) return []
-  const rows: TablesInsert<'knowledge_chunks'>[] = chunks.map((chunk, index) => ({
-    document_id: documentId,
-    project_id: projectId,
-    owner_id: ownerId,
-    chunk_index: index,
-    content: chunk.content,
-    token_count: chunk.tokenCount ?? null,
-    metadata: chunk.metadata ?? {},
-  }))
-  const result = await supabase.from('knowledge_chunks').insert(rows).select('*')
-  throwIfError(result.error)
-  return result.data ?? []
-}
-
 export async function listConversations(projectId: string) {
   const result = await supabase.from('ai_conversations').select('*').eq('project_id', projectId).order('updated_at', { ascending: false })
   throwIfError(result.error)
@@ -166,6 +148,84 @@ export async function saveProjectSuggestion(values: TablesInsert<'project_sugges
 export async function deleteProjectSuggestion(id: string) {
   const result = await supabase.from('project_suggestions').delete().eq('id', id)
   throwIfError(result.error)
+}
+
+export async function getAutomationRequirements(projectId: string) {
+  const result = await supabase.from('automation_requirements').select('*').eq('project_id', projectId).maybeSingle()
+  throwIfError(result.error)
+  return result.data
+}
+
+export async function saveAutomationRequirements(values: TablesInsert<'automation_requirements'> & { id?: string }) {
+  const { id, ...record } = values
+  const result = id
+    ? await supabase.from('automation_requirements').update(record).eq('id', id).select('*').single()
+    : await supabase.from('automation_requirements').upsert(record, { onConflict: 'project_id' }).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
+}
+
+export async function getAutomationWorkflow(projectId: string) {
+  const result = await supabase.from('automation_workflows').select('*').eq('project_id', projectId).maybeSingle()
+  throwIfError(result.error)
+  return result.data
+}
+
+export async function saveAutomationWorkflow(values: TablesInsert<'automation_workflows'> & { id?: string }) {
+  const { id, ...record } = values
+  const result = id
+    ? await supabase.from('automation_workflows').update(record).eq('id', id).select('*').single()
+    : await supabase.from('automation_workflows').upsert(record, { onConflict: 'project_id' }).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
+}
+
+export async function listAutomationExports(projectId: string) {
+  const result = await supabase.from('automation_exports').select('*').eq('project_id', projectId).order('created_at', { ascending: false })
+  throwIfError(result.error)
+  return result.data ?? []
+}
+
+export async function createAutomationExport(values: TablesInsert<'automation_exports'>) {
+  const result = await supabase.from('automation_exports').insert(values).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
+}
+
+export async function listAutomationVersions(projectId: string) {
+  const result = await supabase.from('automation_versions').select('*').eq('project_id', projectId).order('sequence', { ascending: false })
+  throwIfError(result.error)
+  return result.data ?? []
+}
+
+export async function createAutomationVersion(values: TablesInsert<'automation_versions'>) {
+  const result = await supabase.from('automation_versions').insert(values).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
+}
+
+export async function listProjectTimeline(projectId: string) {
+  const result = await supabase.from('project_timeline').select('*').eq('project_id', projectId).order('created_at', { ascending: false })
+  throwIfError(result.error)
+  return result.data ?? []
+}
+
+export async function createProjectTimelineEvent(values: TablesInsert<'project_timeline'>) {
+  const result = await supabase.from('project_timeline').insert(values).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
+}
+
+export async function listWorkflowImports(projectId: string) {
+  const result = await supabase.from('workflow_imports').select('*').eq('project_id', projectId).order('created_at', { ascending: false })
+  throwIfError(result.error)
+  return result.data ?? []
+}
+
+export async function createWorkflowImport(values: TablesInsert<'workflow_imports'>) {
+  const result = await supabase.from('workflow_imports').insert(values).select('*').single()
+  throwIfError(result.error)
+  return requireData(result.data)
 }
 
 export async function listProjectRoadmaps(projectId: string) {

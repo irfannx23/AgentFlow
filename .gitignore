@@ -14,7 +14,18 @@ __v0_jsx-dev-runtime.ts
 
 # Common ignores
 node_modules
+.pnpm-store/
 .next/
+dist/
+coverage/
+logs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+tmp/
+temp/
 *.tsbuildinfo
 .DS_Store
 # Next.js generated types

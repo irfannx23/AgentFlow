@@ -5,36 +5,34 @@ import { AIProvider } from '@/components/ai-provider'
 import { ConversationsProvider } from '@/components/conversations-provider'
 import { KnowledgeProvider } from '@/components/knowledge-provider'
 import { WorkspaceProvider } from '@/components/workspace-state'
+import { ConnectionsProvider } from '@/components/connections-provider'
+import { BillingProvider } from '@/components/billing-provider'
 import './globals.css'
 import './app-styles.css'
 import './auth-styles.css'
 
 export const metadata: Metadata = {
-  title: 'OrbisWeave — AI development workspace',
-  description: 'Turn ideas into powerful AI agents and automations in the OrbisWeave workspace.',
+  title: 'AgentFlow — AI Automation Engineer',
+  description: 'Design, generate, review, optimize, and export production-ready automation workflows with AgentFlow.',
+  applicationName: 'AgentFlow',
+  manifest: '/manifest.webmanifest',
+  openGraph: {
+    title: 'AgentFlow — AI Automation Engineer',
+    description: 'Design, generate, review, optimize, and export production-ready automation workflows.',
+    siteName: 'AgentFlow',
+    type: 'website',
+  },
   generator: 'v0.app',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: [{ url: '/agentflow-logo.svg?v=badge-2', type: 'image/svg+xml' }],
+    shortcut: '/agentflow-logo.svg?v=badge-2',
+    apple: '/agentflow-logo.svg?v=badge-2',
   },
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#080a0d',
+  colorScheme: 'light',
+  themeColor: '#f4f5f1',
 }
 
 export default function RootLayout({
@@ -45,7 +43,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <AuthProvider><WorkspaceProvider><KnowledgeProvider><ConversationsProvider><AIProvider>{children}</AIProvider></ConversationsProvider></KnowledgeProvider></WorkspaceProvider></AuthProvider>
+        <AuthProvider><BillingProvider><WorkspaceProvider><ConnectionsProvider><KnowledgeProvider><ConversationsProvider><AIProvider>{children}</AIProvider></ConversationsProvider></KnowledgeProvider></ConnectionsProvider></WorkspaceProvider></BillingProvider></AuthProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

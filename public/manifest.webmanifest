@@ -1,0 +1,17 @@
+{
+  "name": "AgentFlow",
+  "short_name": "AgentFlow",
+  "description": "AI Automation Engineer for production-ready automation workflows.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f5f1",
+  "theme_color": "#f4f5f1",
+  "icons": [
+    {
+      "src": "/agentflow-logo.svg?v=badge-2",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

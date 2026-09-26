@@ -94,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }), [run])
   const loginWithGoogle = useCallback(() => run(firebaseLoginWithGoogle), [run])
   const signOut = useCallback(() => run(firebaseSignOut), [run])
-  const account = useMemo(() => accountFor(user), [user, profileRevision])
+  const account = useMemo(() => { void profileRevision; return accountFor(user) }, [user, profileRevision])
   const value = useMemo(() => ({ user, account, loading, loginWithEmail, signupWithEmail, loginWithGoogle, signOut }), [user, account, loading, loginWithEmail, signupWithEmail, loginWithGoogle, signOut])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
