@@ -726,6 +726,7 @@ export function ConversationWorkspace({
   const knowledge = useKnowledge();
   const artifactGeneration = useArtifactGeneration();
   const uploadRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const chatScrollRef = useRef<HTMLElement>(null);
   const restoredScrollProjectRef = useRef<string | null>(null);
@@ -901,7 +902,7 @@ export function ConversationWorkspace({
     if (window.sessionStorage.getItem(key) !== "1") return;
     window.sessionStorage.removeItem(key);
     setLocalAssistantMessage(
-      "Your automation blueprint has been restored.\n\nWhat would you like to improve?\n\n• Replace Slack with Teams\n• Add Salesforce\n• Use Outlook instead of Gmail\n• Improve security\n• Reduce workflow complexity\n• Add approval step\n• Regenerate deployment guide",
+      "Automation restored successfully.\n\nSuggested improvements:\n\n• Replace Slack with Teams\n• Add Salesforce\n• Add approval\n• Reduce complexity\n• Improve security",
     );
   }, [
     activeConversation,
@@ -1722,6 +1723,7 @@ ${transcript}`,
   const promptBox = (
     <div className="composer conversation-prompt">
       <textarea
+        ref={composerRef}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
         onKeyDown={(event) => {
@@ -1867,15 +1869,25 @@ ${transcript}`,
                   <small>
                     {item.role === "user" ? account.name : "AgentFlow AI"}
                   </small>
-                  {!completed && <MessageContent content={item.content} />}
+                  {!completed && (
+                    <MessageContent
+                      content={
+                        planned
+                          ? "I've understood your automation.\n\nReview the automation blueprint before generation begins."
+                          : item.content
+                      }
+                    />
+                  )}
                   {planned &&
                     currentToolPlan &&
                     project &&
                     ai.requirements?.status === "planning" && (
                       <ToolPlanCard
+                        automationName={project.name}
                         plan={currentToolPlan}
                         update={saveToolPlan}
                         finalize={finalizeToolPlan}
+                        continueChat={() => composerRef.current?.focus()}
                         busy={busy}
                       />
                     )}{" "}
@@ -1907,11 +1919,13 @@ ${transcript}`,
               ai.requirements?.status === "planning" && (
                 <article className="ide-message assistant">
                   <small>AgentFlow AI</small>
-                  <MessageContent content="Review the detected tools before production generation begins." />
+                  <MessageContent content="I've understood your automation.\n\nReview the automation blueprint before generation begins." />
                   <ToolPlanCard
+                    automationName={project.name}
                     plan={currentToolPlan}
                     update={saveToolPlan}
                     finalize={finalizeToolPlan}
+                    continueChat={() => composerRef.current?.focus()}
                     busy={busy}
                   />
                 </article>

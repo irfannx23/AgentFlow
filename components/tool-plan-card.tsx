@@ -1,18 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
+  ArrowRight,
   BrainCircuit,
   Check,
-  ChevronRight,
-  Circle,
-  FileArchive,
+  ChevronDown,
   GitBranch,
   KeyRound,
+  Layers3,
+  MessageCircle,
   Plug,
   ShieldCheck,
   Sparkles,
-  Variable,
+  Workflow,
   X,
 } from "lucide-react";
 import { useDialogFocus } from "@/components/use-dialog-focus";
@@ -26,14 +27,12 @@ function ToolStatus({ tool }: { tool: AutomationTool }) {
   const status = tool.selectedTool
     ? "Ready"
     : tool.required
-      ? "Needs Selection"
+      ? "Needs selection"
       : tool.skipped
-        ? "Not Required"
+        ? "Not required"
         : "Optional";
   return (
-    <span
-      className={`tool-plan-status ${status.toLowerCase().replace(" ", "-")}`}
-    >
+    <span className={`tool-plan-status ${status.toLowerCase().replaceAll(" ", "-")}`}>
       <i />
       {status}
     </span>
@@ -42,81 +41,80 @@ function ToolStatus({ tool }: { tool: AutomationTool }) {
 
 function BlueprintOverview({ plan }: { plan: ToolPlan }) {
   const { blueprint } = plan;
+  const workflowSteps = [
+    blueprint.trigger,
+    ...blueprint.actions.slice(0, 3),
+    "Automation complete",
+  ];
+
   return (
-    <div className="blueprint-overview">
-      <section className="blueprint-objective">
-        <small>Automation objective</small>
-        <h3>{blueprint.objective}</h3>
-        <p>{plan.summary}</p>
+    <div className="blueprint-overview blueprint-overview-v2">
+      <section className="blueprint-section blueprint-summary-section">
+        <div className="blueprint-section-heading">
+          <span><Sparkles size={16} /></span>
+          <div><h3>Automation summary</h3><p>A concise view of what AgentFlow understood.</p></div>
+        </div>
+        <div className="blueprint-summary-list">
+          <div><Check size={14} /><span><b>Trigger</b>{blueprint.trigger}</span></div>
+          {blueprint.actions.map((action, index) => (
+            <div key={`${action}-${index}`}>
+              <Check size={14} />
+              <span><b>{index === 0 ? "Main workflow" : `Action ${index + 1}`}</b>{action}</span>
+            </div>
+          ))}
+          <div><Check size={14} /><span><b>Expected outcome</b>{blueprint.objective}</span></div>
+        </div>
       </section>
-      <div className="blueprint-metrics">
-        <article>
-          <GitBranch size={15} />
-          <span>
-            <small>Trigger</small>
-            <strong>{blueprint.trigger}</strong>
-          </span>
-        </article>
-        <article>
-          <Sparkles size={15} />
-          <span>
-            <small>Complexity</small>
-            <strong>{blueprint.complexity}</strong>
-          </span>
-        </article>
-        <article>
-          <BrainCircuit size={15} />
-          <span>
-            <small>AI confidence</small>
-            <strong>{blueprint.confidence}%</strong>
-          </span>
-        </article>
-        <article>
-          <FileArchive size={15} />
-          <span>
-            <small>Estimated workflow</small>
-            <strong>{blueprint.estimatedNodes} nodes</strong>
-          </span>
-        </article>
-      </div>
-      <section className="blueprint-actions">
-        <h3>Main workflow</h3>
-        {blueprint.actions.map((action, index) => (
-          <div key={`${action}-${index}`}>
-            <i>{index + 1}</i>
-            <span>{action}</span>
-          </div>
-        ))}
+
+      <section className="blueprint-section">
+        <div className="blueprint-section-heading">
+          <span><Layers3 size={16} /></span>
+          <div><h3>Blueprint at a glance</h3><p>Production scope estimated from the confirmed requirements.</p></div>
+        </div>
+        <div className="blueprint-stats-grid">
+          <article><small>Estimated nodes</small><strong>{blueprint.estimatedNodes}</strong></article>
+          <article><small>Complexity</small><strong>{blueprint.complexity}</strong></article>
+          <article><small>AI confidence</small><strong>{blueprint.confidence}%</strong></article>
+          <article><small>Integrations</small><strong>{plan.tools.length}</strong></article>
+          <article><small>Capabilities</small><strong>{new Set(plan.tools.map((tool) => tool.category)).size}</strong></article>
+        </div>
       </section>
-      <section className="blueprint-artifacts">
-        <h3>Expected downloadable artifacts</h3>
-        <div>
-          {blueprint.expectedArtifacts.map((artifact) => (
-            <span key={artifact}>
-              <Check size={11} />
-              {artifact}
-            </span>
+
+      <section className="blueprint-section">
+        <div className="blueprint-section-heading">
+          <span><GitBranch size={16} /></span>
+          <div><h3>Workflow overview</h3><p>The primary execution path, from trigger to completion.</p></div>
+        </div>
+        <div className="blueprint-timeline">
+          {workflowSteps.map((step, index) => (
+            <div key={`${step}-${index}`}>
+              <i>{index + 1}</i><span>{step}</span>
+              {index < workflowSteps.length - 1 && <ArrowRight size={14} />}
+            </div>
           ))}
         </div>
       </section>
-      <p className="blueprint-note">
-        <KeyRound size={13} />
-        Credentials are planned here and configured later. AgentFlow never
-        requests secret values.
-      </p>
+
+      <section className="blueprint-section">
+        <div className="blueprint-section-heading">
+          <span><Plug size={16} /></span>
+          <div><h3>Detected integrations</h3><p>Recommended from the tools and outcomes in your requirements.</p></div>
+        </div>
+        <div className="blueprint-integrations-grid">
+          {plan.tools.map((tool) => (
+            <article key={tool.id}>
+              <span className="blueprint-integration-icon"><Plug size={16} /></span>
+              <div><small>{tool.category}</small><strong>{tool.selectedTool ?? tool.name}</strong><p>{tool.purpose || tool.usedFor}</p></div>
+              <b>{tool.confidence}%</b>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
 
-function ToolPlanning({
-  plan,
-  update,
-  busy,
-}: {
-  plan: ToolPlan;
-  update: (plan: ToolPlan) => Promise<void>;
-  busy: boolean;
-}) {
+function ToolPlanning({ plan, update, busy }: { plan: ToolPlan; update: (plan: ToolPlan) => Promise<void>; busy: boolean }) {
   const select = async (tool: AutomationTool, value: string) => {
     const skipped = value === "__skip__";
     const selectedTool = skipped ? null : value;
@@ -129,178 +127,66 @@ function ToolPlanning({
               selectedTool,
               skipped,
               configured: Boolean(selectedTool),
-              credential:
-                selectedTool && selectedTool !== item.name
-                  ? `${selectedTool} connection`
-                  : item.credential,
+              credential: selectedTool && selectedTool !== item.name ? `${selectedTool} connection` : item.credential,
             }
           : item,
       ),
     });
   };
-  const readiness = blueprintReadiness(plan);
-  const variables = [
-    ...new Map(
-      plan.tools
-        .flatMap((tool) => tool.environmentVariables)
-        .map((variable) => [variable.name, variable]),
-    ).values(),
-  ];
+
   return (
-    <div className="blueprint-tool-planning">
+    <div className="blueprint-tool-planning blueprint-tool-planning-v2">
+      <div className="tool-planning-intro">
+        <span><Plug size={17} /></span>
+        <div><h3>Choose your automation stack</h3><p>Review the recommended tools. Credentials are connected later—never entered here.</p></div>
+      </div>
       <div className="tool-plan-list">
         {plan.tools.map((tool) => (
-          <article className="tool-plan-detail" key={tool.id}>
+          <article className="tool-plan-detail tool-plan-detail-v2" key={tool.id}>
             <div className="tool-plan-detail-head">
-              <span className="tool-plan-icon">
-                <Plug size={17} />
-              </span>
-              <div>
-                <small>{tool.category}</small>
-                <h3>
-                  {tool.selectedTool ?? `${tool.category} provider required`}
-                </h3>
-                <p>{tool.purpose}</p>
-              </div>
+              <span className="tool-plan-icon"><Plug size={17} /></span>
+              <div><small>{tool.category}</small><h3>{tool.selectedTool ?? tool.name}</h3></div>
               <ToolStatus tool={tool} />
             </div>
-            <label className="tool-choice">
-              Selected tool
-              <select
-                disabled={busy}
-                value={tool.selectedTool ?? (tool.skipped ? "__skip__" : "")}
-                onChange={(event) => void select(tool, event.target.value)}
-              >
-                <option value="" disabled>
-                  Select a provider
-                </option>
-                <option value={tool.name}>{tool.name} · Recommended</option>
-                {tool.alternatives.map((option) => (
-                  <option value={option} key={option}>
-                    {option}
-                  </option>
-                ))}
-                {!tool.required && (
-                  <option value="__skip__">Skip · Not required</option>
-                )}
-              </select>
-            </label>
-            <p className="tool-recommendation">
-              <BrainCircuit size={13} />
-              <span>
-                <b>{tool.confidence}% confidence.</b>{" "}
-                {tool.recommendationReason}
+            <div className="tool-plan-purpose"><small>Purpose</small><p>{tool.usedFor || tool.purpose}</p></div>
+            <label className="tool-choice tool-choice-v2">
+              <span>Recommended tool<small>{tool.confidence}% confidence</small></span>
+              <span className="tool-choice-control">
+                <select
+                  disabled={busy}
+                  value={tool.selectedTool ?? (tool.skipped ? "__skip__" : "")}
+                  onChange={(event) => void select(tool, event.target.value)}
+                  aria-label={`Select ${tool.category} tool`}
+                >
+                  <option value="" disabled>Select a provider</option>
+                  <option value={tool.name}>{tool.name} · Recommended</option>
+                  {tool.alternatives.map((option) => <option value={option} key={option}>{option}</option>)}
+                  {!tool.required && <option value="__skip__">Skip · Not required</option>}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" />
               </span>
-            </p>
-            <dl>
-              <div>
-                <dt>Used for</dt>
-                <dd>{tool.usedFor}</dd>
-              </div>
-              <div>
-                <dt>
-                  <KeyRound size={12} />
-                  Credential plan
-                </dt>
-                <dd>
-                  {tool.credential || "No credential required"} · Configured
-                  later in Connections or n8n
-                </dd>
-              </div>
-              {tool.permissions.length > 0 && (
-                <div>
-                  <dt>
-                    <ShieldCheck size={12} />
-                    Permissions
-                  </dt>
-                  <dd>{tool.permissions.join(" · ")}</dd>
-                </div>
-              )}
-              {tool.environmentVariables.length > 0 && (
-                <div>
-                  <dt>
-                    <Variable size={12} />
-                    Environment
-                  </dt>
-                  <dd>
-                    {tool.environmentVariables
-                      .map((variable) => variable.name)
-                      .join(" · ")}
-                  </dd>
-                </div>
-              )}
-            </dl>
+            </label>
+            <div className="tool-plan-meta">
+              <span><KeyRound size={13} /><small>Credential</small><b>{tool.credential || "None required"}</b></span>
+              <span><ShieldCheck size={13} /><small>Setup</small><b>Configured later</b></span>
+            </div>
+            <p className="tool-plan-reason">{tool.recommendationReason}</p>
           </article>
         ))}
       </div>
-      <section className="environment-preview">
-        <h3>Estimated Environment Variables</h3>
-        {variables.length ? (
-          <div>
-            {variables.map((variable) => (
-              <span key={variable.name}>
-                <code>{variable.name}</code>
-                <small>
-                  {variable.purpose || "Configured during deployment"}
-                </small>
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p>No environment variables are expected.</p>
-        )}
-      </section>
-      <section
-        className={`blueprint-readiness${readiness.ready ? " ready" : ""}`}
-      >
-        <header>
-          <span>
-            <ShieldCheck size={17} />
-            <strong>
-              {readiness.ready
-                ? "Automation Ready"
-                : "Blueprint Needs Attention"}
-            </strong>
-          </span>
-          <small>
-            {readiness.ready
-              ? "All production checks passed."
-              : `${readiness.issues.length} item${readiness.issues.length === 1 ? "" : "s"} remaining.`}
-          </small>
-        </header>
-        <div>
-          {readiness.checks.map((check) => (
-            <span
-              key={check.label}
-              className={
-                check.ready ? "ready" : check.optional ? "optional" : "missing"
-              }
-            >
-              {check.ready ? <Check size={12} /> : <Circle size={10} />}{" "}
-              {check.label}
-              {check.optional && !check.ready ? " · Optional" : ""}
-            </span>
-          ))}
-        </div>
-        {readiness.issues.length > 0 && (
-          <ul>
-            {readiness.issues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   );
 }
 
 function BlueprintModal({
+  automationName,
   plan,
   close,
   update,
   finalize,
   busy,
 }: {
+  automationName: string;
   plan: ToolPlan;
   close: () => void;
   update: (plan: ToolPlan) => Promise<void>;
@@ -310,90 +196,34 @@ function BlueprintModal({
   useDialogFocus<HTMLElement>(close);
   const [tab, setTab] = useState<"blueprint" | "tools">("blueprint");
   const readiness = blueprintReadiness(plan);
+
   return (
-    <div
-      className="report-modal-backdrop tool-plan-backdrop"
-      onMouseDown={(event) => event.target === event.currentTarget && close()}
-    >
-      <section
-        className="report-modal tool-plan-modal blueprint-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="tool-plan-title"
-      >
-        <header>
+    <div className="report-modal-backdrop tool-plan-backdrop" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+      <section className="report-modal tool-plan-modal blueprint-modal blueprint-modal-v2" role="dialog" aria-modal="true" aria-labelledby="tool-plan-title">
+        <header className="blueprint-modal-header">
           <div className="artifact-modal-title">
-            <span className="artifact-modal-icon complete">
-              <BrainCircuit size={20} />
-            </span>
-            <div>
-              <span className="report-modal-badge complete">
-                AI Automation Blueprint
-              </span>
-              <h2 id="tool-plan-title">{plan.blueprint.objective}</h2>
-              <time>Understand → Recommend → Confirm → Generate</time>
-            </div>
+            <span className="artifact-modal-icon complete"><BrainCircuit size={20} /></span>
+            <div><h2 id="tool-plan-title">Automation Blueprint</h2><p>{automationName} · Review the plan before generation.</p></div>
           </div>
-          <button
-            className="artifact-close"
-            onClick={close}
-            aria-label="Close automation blueprint"
-          >
-            <X size={18} />
-          </button>
+          <button className="artifact-close" onClick={close} aria-label="Close automation blueprint"><X size={18} /></button>
         </header>
-        <nav className="blueprint-tabs" aria-label="Automation blueprint steps">
-          <button
-            className={tab === "blueprint" ? "active" : ""}
-            onClick={() => setTab("blueprint")}
-          >
-            <i>1</i>Automation Blueprint
-          </button>
-          <button
-            className={tab === "tools" ? "active" : ""}
-            onClick={() => setTab("tools")}
-          >
-            <i>2</i>Tool Planning
-          </button>
+        <nav className="blueprint-tabs blueprint-tabs-v2" aria-label="Automation blueprint steps" role="tablist">
+          <button role="tab" aria-selected={tab === "blueprint"} className={tab === "blueprint" ? "active" : ""} onClick={() => setTab("blueprint")}><i>1</i><span>Blueprint</span></button>
+          <span className="blueprint-tab-line" />
+          <button role="tab" aria-selected={tab === "tools"} className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><i>2</i><span>Tool Planning</span></button>
         </nav>
-        <div className="report-modal-content">
-          {tab === "blueprint" ? (
-            <BlueprintOverview plan={plan} />
-          ) : (
-            <ToolPlanning plan={plan} update={update} busy={busy} />
-          )}
+        <div className="report-modal-content blueprint-modal-body">
+          {tab === "blueprint" ? <BlueprintOverview plan={plan} /> : <ToolPlanning plan={plan} update={update} busy={busy} />}
         </div>
-        <footer className="tool-plan-footer">
+        <footer className="tool-plan-footer tool-plan-footer-v2">
           <div>
-            <strong>
-              {tab === "blueprint"
-                ? `${plan.tools.length} relevant integration${plan.tools.length === 1 ? "" : "s"} detected`
-                : readiness.ready
-                  ? "Automation stack ready"
-                  : "Selections required"}
-            </strong>
-            <span>
-              {tab === "blueprint"
-                ? "Review the recommended technology stack next."
-                : readiness.ready
-                  ? "The blueprint is compatible with production generation."
-                  : readiness.issues[0]}
-            </span>
+            <strong>{tab === "blueprint" ? "Blueprint ready" : readiness.ready ? "Automation stack ready" : "Stack needs attention"}</strong>
+            <span>{tab === "blueprint" ? `${plan.tools.length} integration${plan.tools.length === 1 ? "" : "s"} detected` : readiness.ready ? "All required tools are selected and compatible." : readiness.issues[0]}</span>
           </div>
           {tab === "blueprint" ? (
-            <button className="lime-button" onClick={() => setTab("tools")}>
-              Continue to Tool Planning
-              <ChevronRight size={15} />
-            </button>
+            <button className="lime-button" onClick={() => setTab("tools")}>Continue to Tool Planning <ArrowRight size={15} /></button>
           ) : (
-            <button
-              className="lime-button"
-              disabled={!readiness.ready || busy}
-              onClick={() => void finalize(plan)}
-            >
-              {busy ? "Finalizing…" : "Finalize Stack"}
-              <ChevronRight size={15} />
-            </button>
+            <button className="lime-button" disabled={!readiness.ready || busy} onClick={() => void finalize(plan)}>{busy ? "Finalizing…" : "Finalize Stack"} <ArrowRight size={15} /></button>
           )}
         </footer>
       </section>
@@ -402,61 +232,52 @@ function BlueprintModal({
 }
 
 export function ToolPlanCard({
+  automationName,
   plan,
   update,
   finalize,
+  continueChat,
   busy = false,
 }: {
+  automationName: string;
   plan: ToolPlan;
   update: (plan: ToolPlan) => Promise<void>;
   finalize: (plan: ToolPlan) => Promise<void>;
+  continueChat: () => void;
   busy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const integrations = useMemo(() => plan.tools.map((tool) => tool.selectedTool ?? tool.name), [plan.tools]);
+
   return (
     <>
-      <aside
-        className="tool-plan-card blueprint-card"
-        aria-label="AI Automation Blueprint"
-      >
-        <span className="tool-plan-card-icon">
-          <BrainCircuit size={21} />
-        </span>
-        <div>
-          <small>AI Automation Blueprint</small>
-          <h3>{plan.blueprint.objective}</h3>
-          <p>{plan.summary}</p>
-          <div className="blueprint-card-metrics">
-            <span>
-              <b>{plan.blueprint.estimatedNodes}</b> estimated nodes
-            </span>
-            <span>
-              <b>{plan.tools.length}</b> integrations
-            </span>
-            <span>
-              <b>{plan.blueprint.confidence}%</b> confidence
-            </span>
-            <span>
-              <b>{plan.blueprint.complexity}</b> complexity
-            </span>
-          </div>
-          <div className="chat-generation-actions">
-            <button className="download" onClick={() => setOpen(true)}>
-              <BrainCircuit size={15} />
-              Review Blueprint
-            </button>
-          </div>
+      <aside className="tool-plan-card blueprint-card blueprint-card-v2" aria-label="AI Automation Blueprint">
+        <div className="blueprint-card-topline">
+          <span className="tool-plan-card-icon"><Workflow size={21} /></span>
+          <span className="blueprint-phase"><i /> Blueprint ready</span>
+        </div>
+        <div className="blueprint-card-copy"><small>AI Automation Blueprint</small><h3>{automationName}</h3><p>{plan.blueprint.objective}</p></div>
+        <div className="blueprint-card-progress" aria-label="Requirements and blueprint complete; tool planning is next">
+          <span><i /><b>Requirements</b></span><span><i /><b>Blueprint</b></span><span className="current"><i /><b>Tool planning</b></span>
+        </div>
+        <div className="blueprint-card-metrics blueprint-card-metrics-v2">
+          <span><b>{plan.blueprint.estimatedNodes}</b> nodes</span><span><b>{plan.blueprint.complexity}</b> complexity</span><span><b>{plan.blueprint.confidence}%</b> confidence</span><span><b>{plan.tools.length}</b> integrations</span>
+        </div>
+        <div className="blueprint-card-integrations" aria-label="Detected integrations">
+          <span>Detected</span>{integrations.slice(0, 4).map((tool) => <b key={tool}>{tool}</b>)}{integrations.length > 4 && <b>+{integrations.length - 4}</b>}
+        </div>
+        <div className="blueprint-card-actions">
+          <button className="blueprint-review-button" onClick={() => setOpen(true)}>Review Blueprint <ArrowRight size={15} /></button>
+          <button className="blueprint-chat-button" onClick={continueChat}><MessageCircle size={14} /> Continue Chat</button>
         </div>
       </aside>
       {open && (
         <BlueprintModal
+          automationName={automationName}
           plan={plan}
           close={() => setOpen(false)}
           update={update}
-          finalize={async (value) => {
-            await finalize(value);
-            setOpen(false);
-          }}
+          finalize={async (value) => { await finalize(value); setOpen(false); }}
           busy={busy}
         />
       )}
