@@ -1,7 +1,27 @@
 import type { Json } from '@/lib/supabase/types'
 
 export type WorkflowNodeType = 'trigger' | 'action' | 'condition' | 'approval' | 'transform' | 'delay' | 'error-handler'
-export type WorkflowNode = { id: string; type: WorkflowNodeType; name: string; description: string; service?: string; operation?: string; inputs: Record<string, Json>; outputs: Record<string, Json>; retry: { attempts: number; backoffSeconds: number }; timeoutSeconds: number; position: { x: number; y: number } }
+export type WorkflowNodeConfiguration = {
+  integrationId: string
+  n8nNodeType: string
+  typeVersion: number
+  operation: string
+  resource?: string
+  authentication: 'none'|'oauth2'|'apiKey'|'basicAuth'|'bearer'|'webhook'|'database'|'ssh'
+  credentialType?: string
+  credentialName?: string
+  credentialRequired: boolean
+  method?: 'GET'|'POST'|'PUT'|'PATCH'|'DELETE'
+  endpoint?: string
+  parameters: Record<string, Json>
+  headers: Record<string, Json>
+  query: Record<string, Json>
+  body: Record<string, Json>
+  requiredParameters: string[]
+  outputMapping: Record<string, Json>
+  notes: string[]
+}
+export type WorkflowNode = { id: string; type: WorkflowNodeType; name: string; description: string; service?: string; operation?: string; inputs: Record<string, Json>; outputs: Record<string, Json>; configuration?: WorkflowNodeConfiguration; retry: { attempts: number; backoffSeconds: number }; timeoutSeconds: number; position: { x: number; y: number } }
 export type WorkflowEdge = { id: string; source: string; target: string; condition?: string; label?: string; errorPath?: boolean }
 export type WorkflowVariable = { name: string; description: string; type: 'string'|'number'|'boolean'|'object'|'array'; required: boolean; default?: Json }
 export type WorkflowCredential = { name: string; service: string; description: string; required: boolean }
@@ -39,6 +59,20 @@ export function workflowValidationIssues(value: unknown): string[] {
     if (node.operation !== undefined && typeof node.operation !== 'string') issues.push(`nodes[${index}].operation must be a string.`)
     if (!node.inputs || typeof node.inputs !== 'object' || Array.isArray(node.inputs)) issues.push(`nodes[${index}].inputs must be an object.`)
     if (!node.outputs || typeof node.outputs !== 'object' || Array.isArray(node.outputs)) issues.push(`nodes[${index}].outputs must be an object.`)
+    if (node.configuration !== undefined) {
+      if (!node.configuration || typeof node.configuration !== 'object' || Array.isArray(node.configuration)) issues.push(`nodes[${index}].configuration must be an object.`)
+      else {
+        if (typeof node.configuration.integrationId !== 'string' || !node.configuration.integrationId) issues.push(`nodes[${index}].configuration.integrationId must be non-empty.`)
+        if (typeof node.configuration.n8nNodeType !== 'string' || !node.configuration.n8nNodeType) issues.push(`nodes[${index}].configuration.n8nNodeType must be non-empty.`)
+        if (!Number.isFinite(node.configuration.typeVersion) || node.configuration.typeVersion <= 0) issues.push(`nodes[${index}].configuration.typeVersion must be positive.`)
+        if (typeof node.configuration.operation !== 'string' || !node.configuration.operation) issues.push(`nodes[${index}].configuration.operation must be non-empty.`)
+        if (!['none','oauth2','apiKey','basicAuth','bearer','webhook','database','ssh'].includes(node.configuration.authentication)) issues.push(`nodes[${index}].configuration.authentication is invalid.`)
+        if (typeof node.configuration.credentialRequired !== 'boolean') issues.push(`nodes[${index}].configuration.credentialRequired must be boolean.`)
+        for (const key of ['parameters','headers','query','body','outputMapping'] as const) if (!node.configuration[key] || typeof node.configuration[key] !== 'object' || Array.isArray(node.configuration[key])) issues.push(`nodes[${index}].configuration.${key} must be an object.`)
+        if (!Array.isArray(node.configuration.requiredParameters) || !node.configuration.requiredParameters.every(item => typeof item === 'string')) issues.push(`nodes[${index}].configuration.requiredParameters must be a string array.`)
+        if (!Array.isArray(node.configuration.notes) || !node.configuration.notes.every(item => typeof item === 'string')) issues.push(`nodes[${index}].configuration.notes must be a string array.`)
+      }
+    }
     if (!node.retry || !Number.isInteger(node.retry.attempts) || node.retry.attempts < 0 || node.retry.attempts > 10 || typeof node.retry.backoffSeconds !== 'number') issues.push(`nodes[${index}].retry is invalid.`)
     if (typeof node.timeoutSeconds !== 'number' || node.timeoutSeconds <= 0) issues.push(`nodes[${index}].timeoutSeconds must be positive.`)
     if (!node.position || typeof node.position.x !== 'number' || typeof node.position.y !== 'number') issues.push(`nodes[${index}].position is invalid.`)

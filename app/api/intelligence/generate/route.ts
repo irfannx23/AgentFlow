@@ -10,7 +10,10 @@ import {
   workflowValidationIssues,
   type WorkflowGraph,
 } from "@/lib/automation/types";
-import { parseToolPlan, toolPlanIssues } from "@/lib/automation/tool-plan";
+import { parseToolPlan, toolPlanFromAnswers, toolPlanIssues } from "@/lib/automation/tool-plan";
+import { configureWorkflowIntegrations } from "@/lib/integrations/intelligence/configure";
+import { integrationConfigurationIssues } from "@/lib/integrations/intelligence/validation";
+import type { Json } from "@/lib/supabase/types";
 import type { AIGenerationRequest } from "@/lib/ai/types";
 import type { ConnectionProvider } from "@/lib/connections/types";
 import {
@@ -880,7 +883,7 @@ export async function POST(request: Request) {
     }
     const workflowInstruction =
       task === "workflow"
-        ? '\nOUTPUT CONTRACT: Return ONLY one valid JSON object matching this exact top-level shape: {"schemaVersion":1,"name":"","description":"","nodes":[{"id":"","type":"trigger|action|condition|approval|transform|delay|error-handler","name":"","description":"","service":"","operation":"","inputs":{},"outputs":{},"retry":{"attempts":3,"backoffSeconds":5},"timeoutSeconds":30,"position":{"x":0,"y":0}}],"edges":[{"id":"","source":"","target":"","condition":"","label":"","errorPath":false}],"variables":[{"name":"","description":"","type":"string|number|boolean|object|array","required":true}],"credentials":[{"name":"","service":"","description":"","required":true}],"assumptions":[],"risks":[]}. Never output markdown, code fences, prose, headings, tables, explanations, deployment content, review content, or any text outside the JSON object. Include exactly one trigger, unique node ids and names, action nodes, explicit error handling, retries, timeouts, and every required branch.'
+        ? '\nOUTPUT CONTRACT: Return ONLY one valid JSON object matching this exact top-level shape: {"schemaVersion":1,"name":"","description":"","nodes":[{"id":"","type":"trigger|action|condition|approval|transform|delay|error-handler","name":"","description":"","service":"","operation":"","inputs":{},"outputs":{},"retry":{"attempts":3,"backoffSeconds":5},"timeoutSeconds":30,"position":{"x":0,"y":0}}],"edges":[{"id":"","source":"","target":"","condition":"","label":"","errorPath":false}],"variables":[{"name":"","description":"","type":"string|number|boolean|object|array","required":true}],"credentials":[{"name":"","service":"","description":"","required":true}],"assumptions":[],"risks":[]}. Never output markdown, code fences, prose, headings, tables, explanations, deployment content, review content, or any text outside the JSON object. Include exactly one trigger, unique node ids and names, action nodes, explicit error handling, retries, timeouts, and every required branch. Set every integration node service to the finalized tool name and use a concise semantic operation such as send-message, append-row, create-contact, update-order, or create-issue. A deterministic Integration Intelligence stage will add provider-specific parameters and credentials after this graph is validated.'
         : task === "tool-plan"
           ? '\nReturn ONLY JSON shaped as {"version":2,"summary":"","blueprint":{"objective":"","trigger":"","actions":[],"complexity":"Low|Medium|High","confidence":95,"estimatedNodes":20,"expectedArtifacts":["README.md","requirements.md","workflow.json","workflow.png","deployment-guide.md",".env.example","testing-checklist.md","architecture-review.md","n8n workflow JSON","Project.zip"]},"tools":[{"id":"","name":"recommended tool","selectedTool":"recommended tool or null when a decision is genuinely required","alternatives":[],"category":"business capability such as Communication, Email, Identity or Storage","purpose":"","usedFor":"","recommendationReason":"short evidence-based reason tied to the requirements","confidence":95,"credential":"OAuth|API credential|No credential","environmentVariables":[{"name":"UPPER_SNAKE_CASE","purpose":"","required":true}],"permissions":[],"optionalConfiguration":[],"required":true,"configured":true,"skipped":false,"exporterSupported":true,"credentialMappable":true,"conflictsWith":[]}]}. Create only capabilities relevant to this project. Recommend conventional tools already named or strongly implied and provide useful alternatives. Set selectedTool null only when choosing incorrectly would materially change the workflow. Optional capabilities may be skipped. Estimate workflow size realistically. Never request or output API keys, passwords, tokens, OAuth secrets, or secret values. Credential fields describe connection types configured later in n8n. No markdown or prose.'
           : task === "change-plan"
@@ -1145,8 +1148,32 @@ export async function POST(request: Request) {
         parsed = parseWorkflow(candidate.text);
       }
       if (!parsed.graph) throw new WorkflowValidationError(parsed.issues);
+      const requirementsAnswers = (requirementsResult.data?.answers ?? {}) as Json;
+      const toolPlan = toolPlanFromAnswers(requirementsAnswers);
+      const configured = await traceStage(
+        "integration-intelligence",
+        () => configureWorkflowIntegrations(parsed.graph!, { toolPlan, answers: requirementsAnswers }),
+        { projectId, toolCount: toolPlan?.tools.length ?? 0 },
+      );
+      const configurationIssues = await traceStage(
+        "node-configuration-validation",
+        () => integrationConfigurationIssues(configured.graph),
+        { projectId, integrations: configured.integrations },
+      );
+      if (configurationIssues.length) throw new WorkflowValidationError(configurationIssues);
+      logLifecycle("info", "integration_intelligence.completed", {
+        requestId: id,
+        stage: "node-configuration",
+        context: {
+          projectId,
+          integrations: configured.integrations,
+          configuredNodes: configured.graph.nodes.filter(node => Boolean(node.configuration)).length,
+          clarificationCount: configured.clarifications.length,
+        },
+      });
       return NextResponse.json({
-        workflow: parsed.graph,
+        workflow: configured.graph,
+        clarifications: configured.clarifications,
         citations,
         model: candidate.model,
         usage: candidate.usage,

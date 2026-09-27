@@ -1,5 +1,6 @@
 import type { Json } from '@/lib/supabase/types'
 import { workflowValidationIssues, type WorkflowEdge, type WorkflowGraph } from '@/lib/automation/types'
+import { integrationConfigurationIssues } from '@/lib/integrations/intelligence/validation'
 
 const SECRET_KEY = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret|private[_-]?key|authorization)/i
 const SAFE_SECRET_VALUE = /^(?:\$\{|\{\{|<|\[|env:|secret:|credential:|redacted|masked|replace[_ -]?me|your[_ -]?)/i
@@ -43,7 +44,7 @@ function cycleIssues(graph: WorkflowGraph) {
 }
 
 export function productionGraphValidationIssues(graph: WorkflowGraph) {
-  const issues = [...workflowValidationIssues(graph), ...cycleIssues(graph)]
+  const issues = [...workflowValidationIssues(graph), ...cycleIssues(graph), ...integrationConfigurationIssues(graph)]
   const positions = new Set<string>()
   graph.nodes.forEach(node => {
     if (!Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) issues.push(`Node ${node.id} has non-finite coordinates.`)
