@@ -1,19 +1,31 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertCircle,
+  Archive,
+  BookOpen,
+  Braces,
   Check,
+  CircleDashed,
+  Clock3,
   Download,
   Eye,
   FileArchive,
   FileCode2,
+  FileText,
   FolderOpen,
+  Image,
   KeyRound,
+  ListChecks,
+  LoaderCircle,
   PackageCheck,
   PartyPopper,
+  Rocket,
+  ShieldCheck,
   X,
 } from "lucide-react";
-import type { ArtifactStage } from "@/components/ai-provider";
+import type { ArtifactJob, ArtifactStage } from "@/components/ai-provider";
 import type { Project } from "@/components/workspace-state";
 import type { Tables } from "@/lib/supabase/types";
 import {
@@ -82,12 +94,29 @@ function RichText({ value }: { value: string }) {
 export function AutomationCompletionCard({
   project,
   ready,
+  jobs,
+  workflowVersion,
+  startedAt,
+  completedAt,
   openDownloads,
+  downloadPackage,
 }: {
   project: Project;
   ready: boolean;
+  jobs: Partial<Record<ArtifactStage, ArtifactJob>>;
+  workflowVersion?: number;
+  startedAt: string;
+  completedAt?: string;
   openDownloads: () => void;
+  downloadPackage: () => void;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (ready) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [ready]);
+
   const openProject = () =>
     window.dispatchEvent(
       new CustomEvent("agentflow:open-project", {
@@ -98,62 +127,108 @@ export function AutomationCompletionCard({
     document
       .querySelector<HTMLTextAreaElement>(".conversation-prompt textarea")
       ?.focus();
+
+  const artifacts: Array<{
+    name: string;
+    stage: ArtifactStage;
+    icon: typeof FileText;
+  }> = [
+    { name: "Workflow JSON", stage: "workflow", icon: Braces },
+    { name: "Workflow PNG", stage: "workflow", icon: Image },
+    { name: "README", stage: "workflow", icon: BookOpen },
+    { name: "Requirements", stage: "requirements", icon: FileText },
+    { name: "Deployment Guide", stage: "deployment", icon: Rocket },
+    { name: "Testing Checklist", stage: "testing", icon: ListChecks },
+    { name: "Architecture Review", stage: "review", icon: ShieldCheck },
+    { name: ".env.example", stage: "environment", icon: FileCode2 },
+    { name: "Project ZIP", stage: "export", icon: Archive },
+  ];
+  const statusFor = (stage: ArtifactStage) =>
+    ready ? "complete" : (jobs[stage]?.status ?? (stage === "requirements" ? "complete" : "queued"));
+  const completed = artifacts.filter((artifact) => statusFor(artifact.stage) === "complete").length;
+  const percentage = ready ? 100 : Math.round((completed / artifacts.length) * 100);
+  const failed = artifacts.some((artifact) => statusFor(artifact.stage) === "error");
+  const validating = artifacts.some((artifact) => statusFor(artifact.stage) === "validating");
+  const timestamps = Object.values(jobs)
+    .map((job) => Date.parse(job.updatedAt))
+    .filter(Number.isFinite);
+  const parsedStartTime = Date.parse(startedAt);
+  const startTime = Number.isFinite(parsedStartTime) ? parsedStartTime : now;
+  const parsedCompletedAt = completedAt ? Date.parse(completedAt) : Number.NaN;
+  const endTime = ready
+    ? timestamps.length
+      ? Math.max(...timestamps)
+      : Number.isFinite(parsedCompletedAt)
+        ? parsedCompletedAt
+        : now
+    : now;
+  const elapsedSeconds = Math.max(0, Math.floor((endTime - startTime) / 1_000));
+  const elapsed = elapsedSeconds >= 60
+    ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`
+    : `${elapsedSeconds}s`;
+  const validation = failed ? "Needs attention" : ready ? "Passed" : validating ? "Validating" : "Pending";
+
   return (
-    <aside
-      className={`chat-generation-card${ready ? " ready" : ""}`}
-      aria-live="polite"
-      aria-label={
-        ready ? "Automation package ready" : "Automation blueprint approved"
-      }
-    >
-      <span className="chat-generation-success">
-        {ready ? <PartyPopper size={24} /> : <Check size={24} />}
-        <i />
-      </span>
-      <div className="chat-generation-copy">
-        <h3>
-          {ready ? "Automation Package Ready" : "Automation Blueprint Approved"}
-        </h3>
-        {ready ? (
-          <>
-            <p>Everything has been generated successfully.</p>
-            <small>
-              View your validated package, download production files, or
-              continue improving the project.
-            </small>
-          </>
-        ) : (
-          <>
-            <p>Your automation stack has been finalized.</p>
-            <p>
-              AgentFlow is now generating your validated production package.
-            </p>
-            <small>Progress is available on the Project page.</small>
-          </>
-        )}
-        <div className="chat-generation-actions">
-          {ready ? (
-            <button className="download" onClick={openDownloads}>
-              <Download size={17} />
-              Open Downloads
-            </button>
-          ) : (
-            <button className="download" onClick={openProject}>
-              <FolderOpen size={17} />
-              Open Project
-            </button>
-          )}
-          {ready ? (
-            <button onClick={openProject}>
-              <FolderOpen size={17} />
-              Open Project
-            </button>
-          ) : (
-            <button onClick={continueChat}>Continue Chat</button>
-          )}
+    <div className="generation-experience">
+      <aside className="chat-generation-card blueprint-approved-card" aria-label="Automation blueprint approved">
+        <span className="chat-generation-success"><Check size={22} /><i /></span>
+        <div className="chat-generation-copy">
+          <h3>Automation Blueprint Approved</h3>
+          <p>Your automation stack has been finalized.</p>
         </div>
+      </aside>
+
+      <div className="package-generation-response">
+        <span className="package-response-mark"><PackageCheck size={16} /></span>
+        <p><strong>AgentFlow AI</strong> is generating and validating your production artifacts in the background. You can continue chatting while the package is prepared.</p>
       </div>
-    </aside>
+
+      <aside className={`production-package-card${ready ? " ready" : ""}${failed ? " failed" : ""}`} aria-label={ready ? "Production package ready" : "Production package generation"}>
+        <header className="production-package-head">
+          <span className="production-package-icon">
+            {ready ? <PartyPopper size={23} /> : failed ? <AlertCircle size={23} /> : <LoaderCircle size={23} />}
+          </span>
+          <div>
+            <small>{ready ? "Validated automation package" : "Background generation"}</small>
+            <h3 aria-live="polite">{ready ? "Production Package Ready" : "Production Package Generation"}</h3>
+            <p>{ready ? "Every production artifact is validated and ready to use." : "Artifacts update individually as each generation stage completes."}</p>
+          </div>
+          <strong>{percentage}%</strong>
+        </header>
+
+        <div className="package-progress" role="progressbar" aria-label="Production package generation" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}>
+          <i style={{ width: `${percentage}%` }} />
+        </div>
+
+        <div className="package-metadata">
+          <span><ShieldCheck size={13} /><small>Validation</small><b>{validation}</b></span>
+          <span><Clock3 size={13} /><small>Elapsed</small><b>{elapsed}</b></span>
+          <span><FileCode2 size={13} /><small>Workflow</small><b>{workflowVersion ? `v${workflowVersion}` : "Pending"}</b></span>
+          <span><PackageCheck size={13} /><small>Completed</small><b>{completed} of {artifacts.length}</b></span>
+        </div>
+
+        <div className="package-artifact-grid">
+          {artifacts.map((artifact) => {
+            const status = statusFor(artifact.stage);
+            const Icon = artifact.icon;
+            return (
+              <div className={`package-artifact ${status}`} key={artifact.name}>
+                <span><Icon size={15} /></span>
+                <div><strong>{artifact.name}</strong><small>{status === "complete" ? "Validated" : status === "error" ? "Failed" : status === "persisting" ? "Saving" : status === "validating" ? "Validating" : status === "generating" ? "Generating" : "Queued"}</small></div>
+                {status === "complete" ? <Check size={14} /> : status === "error" ? <AlertCircle size={14} /> : status === "queued" ? <CircleDashed size={14} /> : <LoaderCircle className="package-spinner" size={14} />}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="production-package-actions">
+          <button className="primary" disabled={!ready} onClick={openDownloads}><Download size={15} />Open Downloads</button>
+          <button disabled={!ready} onClick={downloadPackage}><FileArchive size={15} />Download Package</button>
+          <button onClick={openProject}><FolderOpen size={15} />Open Project</button>
+          <button onClick={continueChat}>Continue Chat</button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -166,16 +241,19 @@ export function ConversationDownloadsModal({
   openProject,
   generateAdvanced,
   advancedStatus,
+  downloadOnOpen = false,
 }: {
   project: Project;
   close: () => void;
   openProject: () => void;
   generateAdvanced: (stage: AdvancedStage) => void;
   advancedStatus: Partial<Record<AdvancedStage, string>>;
+  downloadOnOpen?: boolean;
 } & AIArtifacts) {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"downloads" | "guide">("downloads");
   const [includeRequirementsPdf, setIncludeRequirementsPdf] = useState(false);
+  const automaticDownloadStarted = useRef(false);
   useDialogFocus<HTMLElement>(close);
   const packageData = useMemo(() => {
     if (!requirements || !workflow || !isWorkflowGraph(workflow.graph))
@@ -431,14 +509,22 @@ export function ConversationDownloadsModal({
       });
     return { files, advanced, credentials: graph.credentials };
   }, [exports, includeRequirementsPdf, project.name, requirements, workflow]);
-  const allFiles = [...packageData.files, ...packageData.advanced];
+  const allFiles = useMemo(
+    () => [...packageData.files, ...packageData.advanced],
+    [packageData.advanced, packageData.files],
+  );
   const selectedFile = allFiles.find((file) => file.artifact.name === selected);
   const viewingZip = selected === "Project.zip";
-  const downloadZip = () =>
+  const downloadZip = useCallback(() =>
     void downloadProjectZip(
       `${project.name}-project`,
       allFiles.map((file) => file.artifact),
-    );
+    ), [allFiles, project.name]);
+  useEffect(() => {
+    if (!downloadOnOpen || !allFiles.length || automaticDownloadStarted.current) return;
+    automaticDownloadStarted.current = true;
+    downloadZip();
+  }, [allFiles.length, downloadOnOpen, downloadZip]);
   const advancedRows: Array<{
     stage: AdvancedStage | "requirements-pdf";
     title: string;

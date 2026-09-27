@@ -743,7 +743,7 @@ export function ConversationWorkspace({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const [downloadsMode, setDownloadsMode] = useState<"open" | "download" | null>(null);
   const connectedProviders = useMemo(
     () =>
       new Set(
@@ -868,7 +868,7 @@ export function ConversationWorkspace({
   ]);
 
   useEffect(() => {
-    setDownloadsOpen(false);
+    setDownloadsMode(null);
   }, [projectId]);
 
   useEffect(() => {
@@ -1545,6 +1545,9 @@ ${transcript}`,
     .reverse()
     .find((item) => interactionFrom(item.metadata) === "tool-plan")?.id;
   const hasToolPlanMessage = Boolean(latestToolPlanMessageId);
+  const latestGenerationMessageId = [...displayedMessages]
+    .reverse()
+    .find((item) => interactionFrom(item.metadata) === "generation")?.id;
   const currentWorkflow =
     project && ai.projectId === project.id ? ai.workflow : null;
   const currentGraph =
@@ -1860,7 +1863,9 @@ ${transcript}`,
             {displayedMessages.map((item) => {
               const citations = citationsFrom(item.metadata);
               const interaction = interactionFrom(item.metadata);
-              const completed = interaction === "generation";
+              const generation = interaction === "generation";
+              if (generation && item.id !== latestGenerationMessageId) return null;
+              const completed = generation;
               const planned =
                 interaction === "tool-plan" &&
                 item.id === latestToolPlanMessageId;
@@ -1895,7 +1900,12 @@ ${transcript}`,
                     <AutomationCompletionCard
                       project={project}
                       ready={packageReady}
-                      openDownloads={() => setDownloadsOpen(true)}
+                      jobs={currentJobs}
+                      workflowVersion={currentWorkflow?.version}
+                      startedAt={item.created_at}
+                      completedAt={currentWorkflow?.updated_at}
+                      openDownloads={() => setDownloadsMode("open")}
+                      downloadPackage={() => setDownloadsMode("download")}
                     />
                   )}{" "}
                   {citations.length > 0 && (
@@ -1985,14 +1995,15 @@ ${transcript}`,
           </div>
         </section>
       )}
-      {downloadsOpen && project && (
+      {downloadsMode && project && (
         <ConversationDownloadsModal
           project={project}
           requirements={ai.projectId === project.id ? ai.requirements : null}
           workflow={currentWorkflow}
           exports={ai.projectId === project.id ? ai.exports : []}
-          close={() => setDownloadsOpen(false)}
+          close={() => setDownloadsMode(null)}
           openProject={openCurrentProject}
+          downloadOnOpen={downloadsMode === "download"}
           generateAdvanced={generateAdvanced}
           advancedStatus={{
             deployment: currentJobs.deployment?.status,
