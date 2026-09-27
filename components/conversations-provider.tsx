@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '@/components/account-state'
 import { createConversation, createMessage, deleteConversation, listConversations, listMessages, updateConversation } from '@/lib/supabase/intelligence'
 import type { Tables, TablesInsert, TablesUpdate } from '@/lib/supabase/types'
+import { dispatchAgentFlowEvent } from '@/components/event-bridge'
 
 type ConversationsState = {
   projectId: string | null
@@ -68,6 +69,7 @@ export function ConversationsProvider({ children }: { children: React.ReactNode 
     setConversations(current => [conversation, ...current])
     setActiveConversation(conversation)
     setMessages([])
+    dispatchAgentFlowEvent({ event: 'conversation.created', projectId: nextProjectId, workspaceId: null, metadata: { conversationId: conversation.id } })
     return conversation
   }, [user])
 
@@ -79,6 +81,7 @@ export function ConversationsProvider({ children }: { children: React.ReactNode 
     try {
       const nextMessages = await listMessages(conversation.id)
       if (generation === requestGeneration.current) setMessages(nextMessages)
+      dispatchAgentFlowEvent({ event: 'conversation.continued', projectId: conversation.project_id, workspaceId: null, metadata: { conversationId: conversation.id } })
     } finally {
       if (generation === requestGeneration.current) setLoading(false)
     }

@@ -12,6 +12,7 @@ import type { Json, Tables } from '@/lib/supabase/types'
 import { getAutomationRequirements, getAutomationWorkflow, listAutomationExports } from '@/lib/supabase/intelligence'
 import { newLifecycleRequestId, reportClientLifecycle } from '@/lib/observability/client'
 import { PROJECT_STAGE } from '@/lib/projects/lifecycle'
+import { dispatchAgentFlowEvent } from '@/components/event-bridge'
 
 type UpdateProject = (projectId: string, values: { description?: string; phase?: string }) => Promise<void>
 type WorkflowRow = Tables<'automation_workflows'>
@@ -108,6 +109,9 @@ export function useArtifactGeneration() {
 
   const start = useCallback((project: Project, updateProject: UpdateProject, only?: ArtifactStage|ArtifactStage[], modelOverride?: ConnectionModel | null, change: GenerationChange = {}) => {
     const lifecycleRequestId = newLifecycleRequestId()
+    const regeneration = Boolean(only)
+    const repair = /repair|fix|debug/i.test(`${change.summary ?? ''} ${change.reasoning ?? ''}`)
+    if (repair) dispatchAgentFlowEvent({ event: 'repair.started', projectId: project.id, workspaceId: null, metadata: { stages: Array.isArray(only) ? only : only ? [only] : [] } })
     queue.current = queue.current.catch(() => undefined).then(async () => {
       const lifecycleToken = user ? await user.getIdToken() : ''
       const model = preferredModel(modelOverride)
@@ -148,7 +152,10 @@ export function useArtifactGeneration() {
           const message = error instanceof Error ? error.message : 'Workflow generation failed.'
           ai.setArtifactJob(project.id, 'workflow', 'error', message)
           if (lifecycleToken) void reportClientLifecycle(lifecycleToken, { requestId: lifecycleRequestId, stage: 'artifact-generation', event: 'artifact.failed', projectId: project.id, status: 'failed', error, context: { artifact: 'workflow' } })
-          if (!only) return
+          if (!only) {
+            dispatchAgentFlowEvent({ event: repair ? 'repair.failed' : 'generation.failed', projectId: project.id, workspaceId: null, metadata: { stage: 'workflow', message } })
+            return
+          }
           throw error
         }
       }
@@ -180,6 +187,7 @@ export function useArtifactGeneration() {
           if (lifecycleToken) void reportClientLifecycle(lifecycleToken, { requestId: lifecycleRequestId, stage: 'artifact-generation', event: 'artifact.failed', projectId: project.id, status: 'failed', error, context: { artifact: job.stage } })
         }
       }
+      if (failedStages.size > 0) dispatchAgentFlowEvent({ event: repair ? 'repair.failed' : 'generation.failed', projectId: project.id, workspaceId: null, metadata: { stages: [...failedStages] } })
       if (workflow && graph && failedStages.size === 0) {
         const label = nextVersionLabel(ai.versions[0], change.versionBump)
         const currentRequirements = await getAutomationRequirements(project.id)
@@ -195,10 +203,18 @@ export function useArtifactGeneration() {
           snapshot: { requirements: currentRequirements, workflow, export: latestExport },
         })
         await ai.addTimelineEvent({ project_id: project.id, event_type: 'version', title: `${label} published`, description: change.summary ?? 'Validated automation artifacts were updated.', metadata: { label, modifiedArtifacts: stages } })
+        dispatchAgentFlowEvent({
+          event: repair ? 'workflow.repaired' : regeneration ? 'workflow.regenerated' : 'workflow.generated',
+          projectId: project.id,
+          workspaceId: null,
+          metadata: { stages, label, provider: model.provider, model: model.id, isFirst: !ai.versions.length },
+        })
+        dispatchAgentFlowEvent({ event: repair ? 'repair.completed' : 'generation.completed', projectId: project.id, workspaceId: null, metadata: { stages, label } })
       }
     }).catch(error => {
       const stage = Array.isArray(only) ? only[0] ?? 'workflow' : only ?? 'workflow'
       ai.setArtifactJob(project.id, stage, 'error', error instanceof Error ? error.message : 'Artifact generation failed.')
+      dispatchAgentFlowEvent({ event: repair ? 'repair.failed' : 'generation.failed', projectId: project.id, workspaceId: null, metadata: { stage, message: error instanceof Error ? error.message : 'Artifact generation failed.' } })
       if (user) void user.getIdToken().then(token => reportClientLifecycle(token, { requestId: lifecycleRequestId, stage: 'artifact-scheduling', event: 'artifacts.execution_failed', projectId: project.id, status: 'failed', error, context: { artifact: stage } })).catch(() => undefined)
     })
     return queue.current

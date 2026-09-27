@@ -7,6 +7,7 @@ import { KnowledgeProvider } from '@/components/knowledge-provider'
 import { WorkspaceProvider } from '@/components/workspace-state'
 import { ConnectionsProvider } from '@/components/connections-provider'
 import { BillingProvider } from '@/components/billing-provider'
+import { AgentFlowEventBridge } from '@/components/event-bridge'
 import './globals.css'
 import './app-styles.css'
 import './auth-styles.css'
@@ -43,7 +44,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <AuthProvider><BillingProvider><WorkspaceProvider><ConnectionsProvider><KnowledgeProvider><ConversationsProvider><AIProvider>{children}</AIProvider></ConversationsProvider></KnowledgeProvider></ConnectionsProvider></WorkspaceProvider></BillingProvider></AuthProvider>
+        <AuthProvider><BillingProvider><WorkspaceProvider><ConnectionsProvider><KnowledgeProvider><ConversationsProvider><AIProvider><AgentFlowEventBridge/>{children}</AIProvider></ConversationsProvider></KnowledgeProvider></ConnectionsProvider></WorkspaceProvider></BillingProvider></AuthProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

@@ -22,6 +22,7 @@ import { useBilling } from '@/components/billing-provider'
 import { UpgradeModal } from '@/components/upgrade-modal'
 import { planLabels } from '@/lib/billing/types'
 import { normalizeProjectStage, PROJECT_STAGE, PROJECT_STAGES } from '@/lib/projects/lifecycle'
+import { dispatchAgentFlowEvent } from '@/components/event-bridge'
 
 const logo='/agentflow-logo.svg?v=badge-2'
 const chatLogo='/agentflow-logo.svg?v=badge-2'
@@ -181,7 +182,7 @@ export default function Page(){
   const selectedProject=projects.find(project=>project.id===selectedProjectId)??null
   const openNewProject=useCallback(()=>{if(!user){router.push('/login');return}if((billing.plan==='free'&&projects.length>=3)||!billing.entitlements.canCreateProject){setUpgradeModal(true);return}setProjectModal('new')},[billing.entitlements.canCreateProject,billing.plan,projects.length,router,user])
   useEffect(()=>{const show=()=>{setProjectModal(null);setUpgradeModal(true)};window.addEventListener('agentflow:upgrade-required',show);return()=>window.removeEventListener('agentflow:upgrade-required',show)},[])
-  useEffect(()=>{const show=(event:Event)=>setDownloadNotice((event as CustomEvent<{name?:string}>).detail?.name??'download');window.addEventListener('agentflow:download-complete',show);return()=>window.removeEventListener('agentflow:download-complete',show)},[])
+  useEffect(()=>{const show=(event:Event)=>{const name=(event as CustomEvent<{name?:string}>).detail?.name??'download';setDownloadNotice(name);dispatchAgentFlowEvent({event:'workflow.downloaded',projectId:selectedProjectId,workspaceId:workspace?.id??null,metadata:{name}})};window.addEventListener('agentflow:download-complete',show);return()=>window.removeEventListener('agentflow:download-complete',show)},[selectedProjectId,workspace?.id])
   const openProject=useCallback((project:Project)=>{visitProject(project.id);setSelectedProjectId(project.id);setView('workspace');window.history.pushState(null,'',`/?project=${project.id}`)},[visitProject])
   useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{projectId?:string;stage?:string}>).detail;const target=projects.find(item=>item.id===detail?.projectId);if(target){if(detail.stage)window.sessionStorage.setItem('agentflow:open-stage',JSON.stringify({projectId:target.id,stage:detail.stage}));openProject(target)}};window.addEventListener('agentflow:open-project',open);return()=>window.removeEventListener('agentflow:open-project',open)},[openProject,projects])
   const continueConversation=useCallback((project:Project)=>{
@@ -192,6 +193,7 @@ export default function Page(){
     setSelectedProjectId(project.id)
     setView('home')
     window.history.pushState(null,'',`/?chat=${project.id}`)
+    dispatchAgentFlowEvent({event:'conversation.continued',projectId:project.id,workspaceId:workspace?.id??null,metadata:{source:'project-home'}})
     void Promise.all([
       Promise.allSettled([ai.loadProjectIntelligence(project.id),knowledge.loadProjectKnowledge(project.id),conversations.loadProjectConversations(project.id)]),
       new Promise(resolve=>window.setTimeout(resolve,650)),
@@ -200,7 +202,7 @@ export default function Page(){
       setConversationTransition({projectId:project.id,leaving:true})
       window.setTimeout(()=>{if(transitionGeneration.current===generation)setConversationTransition(null)},260)
     })
-  },[ai,conversations,knowledge,visitProject])
+  },[ai,conversations,knowledge,visitProject,workspace?.id])
   const navigate=useCallback((next:View)=>{setView(next);if(next!=='workspace'){setSelectedProjectId(null);window.history.replaceState(null,'','/')}},[])
   useEffect(()=>{if(!projects.length||selectedProjectId)return;const params=new URLSearchParams(window.location.search);const snapshot=projects.find(item=>item.id===params.get('project'));const chat=projects.find(item=>item.id===params.get('chat'));const target=snapshot??chat;if(target){visitProject(target.id);setSelectedProjectId(target.id);setView(snapshot?'workspace':'home')}},[projects,selectedProjectId,visitProject])
   useEffect(()=>{const pop=()=>{const params=new URLSearchParams(window.location.search);const snapshot=projects.find(item=>item.id===params.get('project'));const chat=projects.find(item=>item.id===params.get('chat'));const target=snapshot??chat;if(target){visitProject(target.id);setSelectedProjectId(target.id);setView(snapshot?'workspace':'home')}else{setSelectedProjectId(null);setView('home')}};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop)},[projects,visitProject])
@@ -220,12 +222,14 @@ export default function Page(){
         for(const file of files)await knowledge.uploadDocument(created.id,file)
         await ai.loadProjectIntelligence(created.id)
         await updateProject(created.id,{description:String(result.analysis?.businessPurpose??description),phase:PROJECT_STAGE.workflowPlanning})
+        dispatchAgentFlowEvent({event:'workflow.imported',projectId:created.id,workspaceId:workspace?.id??null,metadata:{fileName:workflowFile.name,platform:result.platform}})
         selectForConversation(created)
         return
       }
       for(const file of files)await knowledge.uploadDocument(created.id,file)
       selectForConversation(created)
     }catch(value){
+      if(workflowFile)dispatchAgentFlowEvent({event:'workflow.import.failed',projectId:created.id,workspaceId:workspace?.id??null,metadata:{fileName:workflowFile.name,message:value instanceof Error?value.message:'Workflow import failed.'}})
       await deleteProject(created.id)
       throw value
     }

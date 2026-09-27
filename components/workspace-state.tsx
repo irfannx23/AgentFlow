@@ -7,6 +7,7 @@ import type { Tables } from '@/lib/supabase/types'
 import { useBilling } from '@/components/billing-provider'
 import { PROJECT_STAGE } from '@/lib/projects/lifecycle'
 import { supabaseError } from '@/lib/supabase/errors'
+import { reportAgentFlowEvent } from '@/lib/events/emitter'
 
 export type Project = {
   id: string
@@ -196,6 +197,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     const project = toProject(data)
     setProjects(current => [project, ...current])
     void refreshBilling()
+    reportAgentFlowEvent(user, { event: 'project.created', projectId: project.id, workspaceId: workspace.id, metadata: { phase: project.phase } })
     return project
   }, [entitlements.canCreateProject, plan, projects.length, refreshBilling, user, workspace])
 
@@ -208,8 +210,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     if (updateError) throw supabaseError(updateError, 'Unable to update the automation project.')
     const project = toProject(data)
     setProjects(current => current.map(item => item.id === id ? project : item))
+    if (input.phase?.toLowerCase() === 'archived') reportAgentFlowEvent(user, { event: 'project.archived', projectId: id, workspaceId: workspace?.id ?? null, metadata: {} })
     return project
-  }, [])
+  }, [user, workspace?.id])
 
   const deleteProject = useCallback(async (id: string) => {
     const { error: deleteError } = await supabase.from('projects').delete().eq('id', id)
@@ -221,7 +224,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       if (user) window.localStorage.setItem(`orbisweave:recent-projects:${user.uid}`, JSON.stringify(next))
       return next
     })
-  }, [refreshBilling, user])
+    reportAgentFlowEvent(user, { event: 'project.deleted', projectId: id, workspaceId: workspace?.id ?? null, metadata: {} })
+  }, [refreshBilling, user, workspace?.id])
 
   const recentProjects = useMemo(() => {
     const ordered = recentProjectIds.map(id => projects.find(project => project.id === id)).filter((project): project is Project => Boolean(project))

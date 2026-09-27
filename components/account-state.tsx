@@ -10,6 +10,7 @@ import {
   signOut as firebaseSignOut,
   signupWithEmail as firebaseSignupWithEmail,
 } from '@/lib/auth'
+import { reportAgentFlowEvent } from '@/lib/events/emitter'
 
 export type AccountIdentity = {
   status: 'signed-in' | 'guest'
@@ -85,15 +86,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const loginWithEmail = useCallback((email: string, password: string) =>
-    run(() => firebaseLoginWithEmail(email, password)), [run])
+    run(async () => {
+      const credential = await firebaseLoginWithEmail(email, password)
+      reportAgentFlowEvent(credential.user, { event: 'user.logged_in', projectId: null, workspaceId: null, metadata: { method: 'email' } })
+    }), [run])
   const signupWithEmail = useCallback((name: string, email: string, password: string) =>
     run(async () => {
       const credential = await firebaseSignupWithEmail(name, email, password)
       setUser(credential.user)
       setProfileRevision(revision => revision + 1)
+      reportAgentFlowEvent(credential.user, { event: 'user.registered', projectId: null, workspaceId: null, metadata: { method: 'email' } })
     }), [run])
-  const loginWithGoogle = useCallback(() => run(firebaseLoginWithGoogle), [run])
-  const signOut = useCallback(() => run(firebaseSignOut), [run])
+  const loginWithGoogle = useCallback(() => run(async () => {
+    const credential = await firebaseLoginWithGoogle()
+    reportAgentFlowEvent(credential.user, { event: 'user.logged_in', projectId: null, workspaceId: null, metadata: { method: 'google' } })
+  }), [run])
+  const signOut = useCallback(() => run(async () => {
+    reportAgentFlowEvent(user, { event: 'user.logged_out', projectId: null, workspaceId: null, metadata: {} })
+    await firebaseSignOut()
+  }), [run, user])
   const account = useMemo(() => { void profileRevision; return accountFor(user) }, [user, profileRevision])
   const value = useMemo(() => ({ user, account, loading, loginWithEmail, signupWithEmail, loginWithGoogle, signOut }), [user, account, loading, loginWithEmail, signupWithEmail, loginWithGoogle, signOut])
 

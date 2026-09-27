@@ -25,6 +25,7 @@ import {
   listWorkflowImports,
 } from '@/lib/supabase/intelligence'
 import type { Tables, TablesInsert } from '@/lib/supabase/types'
+import { dispatchAgentFlowEvent } from '@/components/event-bridge'
 
 export type ArtifactStage = 'requirements' | 'workflow' | 'deployment' | 'environment' | 'testing' | 'review' | 'export'
 export type ArtifactJobStatus = 'queued' | 'generating' | 'validating' | 'persisting' | 'complete' | 'error'
@@ -178,6 +179,7 @@ export function AIProvider({ children }: { children: React.ReactNode }) {
       setExports(current => [saved, ...current])
       setLoading(false)
     }
+    dispatchAgentFlowEvent({ event: 'workflow.exported', projectId: saved.project_id, workspaceId: null, metadata: { platform: saved.platform, workflowVersion: saved.workflow_version } })
     return saved
   }, [user])
 

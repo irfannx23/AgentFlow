@@ -22,6 +22,7 @@ import {
   type AutomationTool,
   type ToolPlan,
 } from "@/lib/automation/tool-plan";
+import { dispatchAgentFlowEvent } from "@/components/event-bridge";
 
 function ToolStatus({ tool }: { tool: AutomationTool }) {
   const status = tool.selectedTool
@@ -132,6 +133,7 @@ function ToolPlanning({ plan, update, busy }: { plan: ToolPlan; update: (plan: T
           : item,
       ),
     });
+    dispatchAgentFlowEvent({ event: "tool.selected", projectId: null, workspaceId: null, metadata: { category: tool.category, toolId: tool.id, selectedTool, skipped } });
   };
 
   return (

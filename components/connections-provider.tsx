@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAuth } from '@/components/account-state'
 import { useWorkspace } from '@/components/workspace-state'
 import type { ConnectionModel, ConnectionProvider, ConnectionSummary } from '@/lib/connections/types'
+import { reportAgentFlowEvent } from '@/lib/events/emitter'
 
 type ConnectionsState = {
   connections: ConnectionSummary[]
@@ -102,14 +103,16 @@ export function ConnectionsProvider({ children }: { children: React.ReactNode })
     const payload = await request('POST', provider, apiKey)
     if (payload?.connection) replace(payload.connection)
     if (payload?.connection?.status !== 'connected') clearDefaultProvider(provider)
+    if (payload?.valid === true) reportAgentFlowEvent(user, { event: 'provider.connected', projectId: null, workspaceId: workspace?.id ?? null, metadata: { provider } })
     return payload?.valid === true
-  }, [clearDefaultProvider, replace, request])
+  }, [clearDefaultProvider, replace, request, user, workspace?.id])
   const testCredential = useCallback(async (provider: ConnectionProvider, apiKey: string) => (await request('POST', provider, apiKey, true))?.valid === true, [request])
   const disconnect = useCallback(async (provider: ConnectionProvider) => {
     await request('DELETE', provider)
     setConnections(current => current.filter(item => item.provider !== provider))
     clearDefaultProvider(provider)
-  }, [clearDefaultProvider, request])
+    reportAgentFlowEvent(user, { event: 'provider.disconnected', projectId: null, workspaceId: workspace?.id ?? null, metadata: { provider, affectsActiveWorkflow: false } })
+  }, [clearDefaultProvider, request, user, workspace?.id])
   const test = useCallback(async (provider: ConnectionProvider) => {
     const payload = await request('PATCH', provider)
     if (payload?.connection) replace(payload.connection)
@@ -126,7 +129,8 @@ export function ConnectionsProvider({ children }: { children: React.ReactNode })
     const key = `${model.provider}:${model.id}`
     setDefaultModelKey(key)
     if (preferenceKey) window.localStorage.setItem(preferenceKey, key)
-  }, [connections, models, preferenceKey])
+    reportAgentFlowEvent(user, { event: 'model.changed', projectId: null, workspaceId: workspace?.id ?? null, metadata: { provider, model: model.id } })
+  }, [connections, models, preferenceKey, user, workspace?.id])
 
   const value = useMemo(() => ({ connections, models, defaultModel, defaultProvider, preferenceReady, loading, error, connect, testCredential, disconnect, test, setDefaultProvider, reload }), [connections, models, defaultModel, defaultProvider, preferenceReady, loading, error, connect, testCredential, disconnect, test, setDefaultProvider, reload])
   return <ConnectionsContext.Provider value={value}>{children}</ConnectionsContext.Provider>

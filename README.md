@@ -1,5 +1,7 @@
 # AgentFlow
 
+Backend intelligence integration is documented in [docs/backend-integration.md](docs/backend-integration.md).
+
 AgentFlow is a modern AI Automation Engineer that transforms natural-language business requirements into validated, production-ready workflow packages.
 
 > **Release status:** Version 1.1.0 — Production Candidate
