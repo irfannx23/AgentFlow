@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { createPortal } from "react-dom";
 import {
   Bot,
   BrainCircuit,
@@ -51,7 +52,7 @@ const iconMap: Record<IntegrationIcon, ComponentType<LucideProps>> = {
 };
 
 export function IntegrationCard({ integration }: { integration: IntegrationDefinition }) {
-  const statusLabel = integration.status === "coming-soon" ? "Coming Soon" : integration.status === "enterprise" ? "Enterprise" : integration.status === "beta" ? "Beta" : null;
+  const statusLabel = integration.status === "coming-soon" ? "Coming Soon" : integration.status === "enterprise" ? "Enterprise" : integration.status === "beta" ? "Beta" : "Supported";
 
   return (
     <article className="integration-explorer-card">
@@ -100,12 +101,18 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
   const dialogRef = useDialogFocus<HTMLDivElement>(requestClose);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousOverflow; };
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
   }, []);
   useEffect(() => {
     if (!closing) return;
-    const timer = window.setTimeout(onClose, 180);
+    const timer = window.setTimeout(onClose, 200);
     return () => window.clearTimeout(timer);
   }, [closing, onClose]);
   const normalizedQuery = query.trim().toLowerCase();
@@ -124,8 +131,9 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
   }, [normalizedQuery]);
   const featuredIntegrations = integrationRegistry.filter((integration) => integration.featured);
 
-  return (
-    <div className={`integration-explorer-backdrop${closing ? " closing" : ""}`} onMouseDown={requestClose}>
+  return createPortal(
+    <div className="design-v2 integration-explorer-portal">
+      <div className={`integration-explorer-backdrop${closing ? " closing" : ""}`} onMouseDown={requestClose}>
       <div
         ref={dialogRef}
         className={`integration-explorer-modal${closing ? " closing" : ""}`}
@@ -211,8 +219,13 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
+        <footer className="integration-explorer-footer">
+          New integrations are added continuously as AgentFlow evolves.
+        </footer>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
