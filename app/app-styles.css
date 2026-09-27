@@ -551,3 +551,8 @@
   .design-v2 .integration-explorer-modal,
   .design-v2 .integration-explorer-card { animation: none; transition: none; }
 }
+
+.design-v2 .download-success{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr) 28px;gap:12px;padding:15px 16px;border:1px solid rgba(112,164,31,.2);border-radius:15px;background:linear-gradient(135deg,rgba(246,253,237,.96),rgba(255,255,255,.82));box-shadow:0 12px 30px rgba(63,88,45,.08);animation:message-in .2s ease-out}.design-v2 .download-success>span{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:rgba(145,215,44,.16);color:#628f24}.design-v2 .download-success h3{margin:0 0 4px!important;color:#2b372d;font-size:13px!important}.design-v2 .download-success p{margin:0;color:#566359;font-size:11px;line-height:1.55}.design-v2 .download-success small{display:block;margin-top:7px;color:#778279;font-size:10px;line-height:1.5}.design-v2 .download-success>button{width:28px;height:28px;display:grid;place-items:center;border:0;border-radius:9px;background:transparent;color:#829087}.design-v2 .download-success>button:hover{background:rgba(255,255,255,.8);color:#344037}
+@media(max-width:760px){.design-v2 .download-success{grid-template-columns:32px minmax(0,1fr) 26px;padding:13px}.design-v2 .download-success>span{width:30px;height:30px}}
+.design-v2 .global-download-success{position:fixed;z-index:300;right:22px;bottom:22px;width:min(520px,calc(100vw - 32px));backdrop-filter:blur(24px)}
+@media(max-width:760px){.design-v2 .global-download-success{right:16px;bottom:16px}}

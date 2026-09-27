@@ -2,7 +2,7 @@
 
 AgentFlow is a modern AI Automation Engineer that transforms natural-language business requirements into validated, production-ready workflow packages.
 
-> **Release status:** Version 1.0.0 — Production Candidate
+> **Release status:** Version 1.1.0 — Production Candidate
 >
 > PayU is currently integrated in Test Mode for checkout demonstration only. Subscription activation and production payment processing are not enabled.
 
@@ -19,7 +19,8 @@ AgentFlow is a modern AI Automation Engineer that transforms natural-language bu
 - Independent background artifact generation and per-stage retry behavior
 - Project version history, activity timeline, and incremental regeneration
 - Architecture review, deployment guide, environment template, and testing checklist
-- Downloadable README, internal graph, workflow PNG, n8n workflow, and project ZIP
+- Focused downloads with one importable `workflow.json`, README, deployment guide, environment template, advanced documentation, and a complete project ZIP
+- Conversational workflow diagnosis and targeted, versioned repair using uploaded workflows, Project ZIPs, screenshots, and execution logs
 - Firebase Authentication with Supabase persistence and Row Level Security
 - Usage analytics and PayU Test checkout integration
 

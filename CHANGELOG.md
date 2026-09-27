@@ -2,6 +2,26 @@
 
 All notable changes to AgentFlow are documented in this file.
 
+## [1.1.0] - 2026-09-27
+
+### Added
+
+- Conversational workflow repair guidance grounded in project memory, uploaded workflows, screenshots, and execution logs
+- Project ZIP and `.log` knowledge ingestion with safe archive extraction limits
+- Download completion guidance with practical n8n import, configuration, testing, deployment, and repair next steps
+
+### Changed
+
+- Reduced the primary download surface to Project ZIP, `workflow.json`, README, deployment guide, and `.env.example`
+- Moved requirements, architecture review, testing checklist, and workflow diagram behind Advanced Files
+- Consolidated the public workflow download into one exporter-generated, n8n-importable `workflow.json`
+- Made document processing complete before the corresponding AI request retrieves project knowledge
+
+### Fixed
+
+- Removed duplicate workflow JSON entries that could invalidate project ZIP creation
+- Preserved historical workflow versions while generating targeted repair versions for affected artifacts only
+
 ## [1.0.0] - 2026-09-26
 
 ### Added

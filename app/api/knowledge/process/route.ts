@@ -16,7 +16,7 @@ function bearerToken(request: Request) {
 
 function publicDocumentError(value: unknown) {
   const message = value instanceof Error ? value.message : ''
-  return /^(Document must be|Unsupported document type|No readable text was found|Invalid API Key|Model unavailable|Rate limit exceeded|Connect Google Gemini)/.test(message) ? message : 'Document processing failed. Please try again.'
+  return /^(Document must be|Unsupported document type|No readable text was found|No readable automation files|Invalid API Key|Model unavailable|Rate limit exceeded|Connect Google Gemini)/.test(message) ? message : 'Document processing failed. Please try again.'
 }
 
 export async function POST(request: Request) {

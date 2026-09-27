@@ -41,8 +41,6 @@ import { optimizeWorkflowGraph } from "@/lib/automation/quality";
 import {
   downloadArtifact,
   downloadProjectZip,
-  safeFileName,
-  textPdf,
   workflowPng,
   type DownloadArtifact,
 } from "@/lib/automation/downloads";
@@ -592,7 +590,6 @@ export function ProjectWorkspace({
             n8nValidationIssues(item.payload).length === 0,
         )
       : undefined;
-  const projectSlug = safeFileName(project.name);
   const loadProjectIntelligence = ai.loadProjectIntelligence;
   useEffect(() => {
     void loadProjectIntelligence(project.id);
@@ -627,11 +624,6 @@ export function ProjectWorkspace({
   const workflowFiles: DownloadArtifact[] =
     positionedGraph && workflowReady
       ? [
-          {
-            name: "workflow.json",
-            data: JSON.stringify(positionedGraph, null, 2),
-            mimeType: "application/json",
-          },
           {
             name: "workflow.png",
             data: () => workflowPng(positionedGraph),
@@ -684,7 +676,7 @@ export function ProjectWorkspace({
     : [];
   const productionExportFile: DownloadArtifact | null = latestExport
     ? {
-        name: `${projectSlug}.json`,
+        name: "workflow.json",
         data: JSON.stringify(latestExport.payload, null, 2),
         mimeType: "application/json",
       }
@@ -698,7 +690,7 @@ export function ProjectWorkspace({
     ...reviewFiles,
     ...(productionExportFile ? [productionExportFile] : []),
   ];
-  const readme = `# ${project.name}\n\n## Overview\n\n${graph?.description ?? project.description}\n\n## Requirements\n\n${ai.requirements?.business_problem ?? project.description}\n\n${answers.map(([key, value]) => `- ${key.replace(/([A-Z])/g, " $1")}: ${String(value)}`).join("\n")}\n\n## Setup\n\n1. Import production-workflow.json into n8n.\n2. Configure the required credentials and environment variables.\n3. Test every workflow branch before activation.\n\n## APIs\n\n${graph?.credentials.length ? graph.credentials.map((item) => `- ${item.service}: ${item.description}`).join("\n") : "- No external API credentials are declared."}\n\n## Environment Variables\n\n${environmentVariables.length ? environmentVariables.map((item) => `- ${item.name}: ${item.description}`).join("\n") : "- No environment variables are required."}\n\n## Deployment\n\nImport, configure, test, and activate the validated workflow.\n\n## Testing\n\nVerify triggers, branches, integrations, retries, and failure handling.\n\n## Future Updates\n\nContinue the AgentFlow conversation to create a new validated version.\n`;
+  const readme = `# ${project.name}\n\n## Overview\n\n${graph?.description ?? project.description}\n\n## Requirements\n\n${ai.requirements?.business_problem ?? project.description}\n\n${answers.map(([key, value]) => `- ${key.replace(/([A-Z])/g, " $1")}: ${String(value)}`).join("\n")}\n\n## Setup\n\n1. Import workflow.json into n8n.\n2. Configure the required credentials and environment variables.\n3. Test every workflow branch before activation.\n\n## APIs\n\n${graph?.credentials.length ? graph.credentials.map((item) => `- ${item.service}: ${item.description}`).join("\n") : "- No external API credentials are declared."}\n\n## Environment Variables\n\n${environmentVariables.length ? environmentVariables.map((item) => `- ${item.name}: ${item.description}`).join("\n") : "- No environment variables are required."}\n\n## Deployment\n\nImport, configure, test, and activate the validated workflow.\n\n## Testing\n\nVerify triggers, branches, integrations, retries, and failure handling.\n\n## Future Updates\n\nContinue the AgentFlow conversation to diagnose failures, request targeted repairs, and create a new validated version without overwriting this one.\n`;
   const readmeFile: DownloadArtifact = {
     name: "README.md",
     data: readme,
@@ -716,14 +708,14 @@ export function ProjectWorkspace({
     testingReady &&
     reviewReady &&
     Boolean(latestExport);
-  const exportProject = () => {
+  const exportProject = async () => {
     void ai.addTimelineEvent({
       project_id: project.id,
       event_type: "project_downloaded",
       title: "Project package downloaded",
       description: "Downloaded the latest validated project artifacts.",
     });
-    void downloadProjectZip(project.name, validatedFiles);
+    await downloadProjectZip(project.name, validatedFiles);
   };
   const regenerate = (stage: ArtifactStage) => {
     void generation.start(project, onUpdate, stage, undefined, {
@@ -763,19 +755,6 @@ export function ProjectWorkspace({
         mimeType: "text/markdown",
       },
       {
-        name: "requirements.pdf",
-        data: textPdf(
-          `${project.name} Requirements`,
-          requirementsText.replace(/^#+\s*/gm, ""),
-        ),
-        mimeType: "application/pdf",
-      },
-      {
-        name: "workflow.json",
-        data: JSON.stringify(workflowJson, null, 2),
-        mimeType: "application/json",
-      },
-      {
         name: "deployment-guide.md",
         data: String(storedWorkflow?.deployment_guide ?? ""),
         mimeType: "text/markdown",
@@ -803,9 +782,15 @@ export function ProjectWorkspace({
     ];
     if (storedExport?.payload)
       files.push({
-        name: `${projectSlug}.json`,
+        name: "workflow.json",
         data: JSON.stringify(storedExport.payload, null, 2),
         mimeType: "application/json",
+      });
+    if (isWorkflowGraph(workflowJson))
+      files.push({
+        name: "workflow.png",
+        data: () => workflowPng(workflowJson),
+        mimeType: "image/png",
       });
     void downloadProjectZip(`${project.name}-${version.label}`, files);
     void ai.addTimelineEvent({
@@ -1269,7 +1254,7 @@ export function ProjectWorkspace({
         <div className="report-doc">
           <DocHeading icon={<PackageCheck size={14} />} title="How to import" />
           <p>
-            Import <b>{projectSlug}.json</b> into n8n, configure the{" "}
+            Import <b>workflow.json</b> into n8n, configure the{" "}
             {graph?.credentials.length ?? 0} declared credential
             {graph?.credentials.length === 1 ? "" : "s"}, verify environment
             values, and execute the testing checklist before activation.
@@ -1362,7 +1347,7 @@ export function ProjectWorkspace({
         <div className="report-footer-actions">
           <button
             className="secondary-action"
-            onClick={exportProject}
+            onClick={() => void exportProject()}
             disabled={!allReady}
           >
             <FileArchive size={16} />
@@ -1379,7 +1364,7 @@ export function ProjectWorkspace({
           item={active}
           close={() => setActiveId(null)}
           regenerate={regenerate}
-          downloadProject={exportProject}
+          downloadProject={() => void exportProject()}
           projectReady={allReady}
         />
       )}{" "}

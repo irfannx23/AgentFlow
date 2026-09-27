@@ -71,7 +71,9 @@ export function KnowledgeProvider({ children }: { children: React.ReactNode }) {
     if (!user) throw new Error('Sign in to upload automation requirements.')
     const document = await uploadKnowledgeDocument(nextProjectId, user.uid, file, metadata)
     if (projectId === nextProjectId) setDocuments(current => [document, ...current])
-    void processDocumentRequest(user, document.id).then(() => loadProjectKnowledge(nextProjectId)).catch(() => loadProjectKnowledge(nextProjectId))
+    // Ensure the next interview or repair request can retrieve this document.
+    await processDocumentRequest(user, document.id)
+    await loadProjectKnowledge(nextProjectId)
     return document
   }, [loadProjectKnowledge, projectId, user])
 

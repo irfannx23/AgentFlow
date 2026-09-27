@@ -1074,6 +1074,8 @@ Return only JSON shaped exactly as:
 Rules:
 - Extract maximum information from the user's words and project documents.
 - Interpret short commands such as "add Slack", "remove Gmail", or "replace Gmail with Outlook" as edits to the current requirements.
+- Treat uploaded workflow exports, Project.zip files, screenshots, execution logs, console logs, stack traces, and node exports as evidence for repairing the existing automation, never as a request to recreate the project.
+- For repair requests, preserve unaffected requirements and identify only the broken integration, operation, parameter, expression, credential mapping, endpoint, or workflow branch.
 - Preserve previously confirmed details unless the user changes them.
 - Infer safe, conventional defaults and list every inference in assumptions.
 - Confidence is an integer from 0 to 100 for each field.
@@ -1445,7 +1447,7 @@ ${transcript}`,
           ? "TOOL_PLAN_READY"
           : snapshot?.complete || plannedChange
             ? plannedChange?.intent === "debug"
-              ? "Briefly identify the likely root cause from the supplied workflow, logs, screenshots, and project memory; state the corrective action and which artifacts will update. Do not show raw JSON, raw diffs, deployment documentation, or progress lists."
+              ? "Briefly identify the root cause from the supplied workflow, logs, screenshots, execution history, and project memory. Compare affected nodes with the supported integration configuration, explain the safe corrective action, and state which artifacts will update. Ask one focused question only when the evidence cannot distinguish between materially different fixes. Never tell the user to recreate the workflow. Do not show raw JSON, raw diffs, deployment documentation, or progress lists."
               : "The automation requirements were updated. Respond naturally and concisely to the user. Confirm the requested change without showing workflow descriptions, JSON, deployment guidance, progress lists, or generated artifacts. Mention that the Project page will update in the background."
             : snapshot
               ? `The requirements are not yet sufficient. Say that you understand most of the automation, then ask exactly this one question and no other question: ${snapshot.nextQuestion}`
@@ -1858,7 +1860,7 @@ ${transcript}`,
         hidden
         multiple
         type="file"
-        accept=".md,.markdown,.pdf,.docx,image/*,.txt,.json,.yaml,.yml"
+        accept=".md,.markdown,.pdf,.docx,image/png,image/jpeg,.txt,.log,.json,.yaml,.yml,.zip,application/zip"
         onChange={(event) => setFiles([...(event.target.files ?? [])])}
       />
       {!hasConversation ? (

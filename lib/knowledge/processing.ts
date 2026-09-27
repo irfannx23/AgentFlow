@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import mammoth from 'mammoth'
 import pdf from 'pdf-parse/lib/pdf-parse.js'
 import type { AIProviderAdapter } from '@/lib/ai/provider'
+import { extractZipText } from '@/lib/knowledge/archive'
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 const CHUNK_SIZE = 1_600
@@ -12,13 +13,14 @@ const CHUNK_OVERLAP = 240
 export function validateDocument(name: string, mimeType: string | null, size: number) {
   if (size <= 0 || size > MAX_FILE_BYTES) throw new Error('Document must be between 1 byte and 50 MB.')
   const extension = name.toLowerCase().split('.').pop() ?? ''
-  const supported = ['txt', 'md', 'markdown', 'json', 'yaml', 'yml', 'pdf', 'docx'].includes(extension) || mimeType?.startsWith('image/')
-  if (!supported) throw new Error('Unsupported document type. Upload text, Markdown, JSON, YAML, PDF, Word, or an image.')
+  const supported = ['txt', 'log', 'md', 'markdown', 'json', 'yaml', 'yml', 'pdf', 'docx', 'zip'].includes(extension) || mimeType?.startsWith('image/')
+  if (!supported) throw new Error('Unsupported document type. Upload text, logs, Markdown, workflow JSON, Project.zip, PDF, Word, or an image.')
 }
 
 export async function extractDocumentText(name: string, mimeType: string | null, bytes: Uint8Array, provider: AIProviderAdapter, credential: string) {
   const extension = name.toLowerCase().split('.').pop() ?? ''
   const buffer = Buffer.from(bytes)
+  if (extension === 'zip' || mimeType === 'application/zip') return extractZipText(bytes)
   if (mimeType?.startsWith('image/')) return provider.extractText(buffer.toString('base64'), mimeType, credential)
   if (extension === 'pdf' || mimeType === 'application/pdf') return (await pdf(buffer)).text
   if (extension === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return (await mammoth.extractRawText({ buffer })).value

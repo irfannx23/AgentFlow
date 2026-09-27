@@ -20,6 +20,7 @@ import {
   type WorkflowNode,
 } from "@/lib/automation/types";
 import { productionGraphValidationIssues } from "@/lib/automation/validation";
+import { extractZipText } from "@/lib/knowledge/archive";
 import {
   answersWithToolPlan,
   parseToolPlan,
@@ -272,17 +273,36 @@ test("download artifacts have safe names, MIME types, data and a valid ZIP envel
       data: new Uint8Array([137, 80, 78, 71]),
       mimeType: "image/png",
     },
-    {
-      name: "production-workflow.json",
-      data: "{}",
-      mimeType: "application/json",
-    },
+    { name: "deployment-guide.md", data: "# Deploy", mimeType: "text/markdown" },
   ];
   assert.deepEqual(artifactValidationIssues(artifacts), []);
   assert.equal(safeFileName("Employee Onboarding!"), "employee-onboarding");
   const zip = zipArtifacts(artifacts);
   assert.deepEqual([...zip.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
   assert.deepEqual([...zip.slice(-22, -18)], [0x50, 0x4b, 0x05, 0x06]);
+});
+
+test("project packages expose one importable workflow JSON", () => {
+  const graph = fixture(scenarios[0]);
+  const exported = exportN8n(graph);
+  const artifacts: DownloadArtifact[] = [
+    { name: "workflow.json", data: JSON.stringify(exported), mimeType: "application/json" },
+    { name: "README.md", data: "Import workflow.json into n8n.", mimeType: "text/markdown" },
+    { name: "deployment-guide.md", data: "# Deploy", mimeType: "text/markdown" },
+    { name: ".env.example", data: "WORKFLOW_ENV=", mimeType: "text/plain" },
+    { name: "requirements.md", data: "# Requirements", mimeType: "text/markdown" },
+    { name: "architecture-review.md", data: "# Review", mimeType: "text/markdown" },
+    { name: "testing-checklist.md", data: "- [ ] Test", mimeType: "text/markdown" },
+    { name: "workflow.png", data: new Uint8Array([137, 80, 78, 71]), mimeType: "image/png" },
+  ];
+  assert.equal(artifacts.filter((artifact) => artifact.name.endsWith(".json")).length, 1);
+  assert.deepEqual(n8nValidationIssues(JSON.parse(String(artifacts[0].data))), []);
+  assert.deepEqual(artifactValidationIssues(artifacts), []);
+  const zip = zipArtifacts(artifacts);
+  const extracted = extractZipText(zip);
+  assert.match(extracted, /workflow\.json/);
+  assert.match(extracted, /Import workflow\.json into n8n/);
+  assert.doesNotMatch(extracted, /PNG/);
 });
 
 test("automation blueprints persist safely and gate generation on required capability selections", () => {

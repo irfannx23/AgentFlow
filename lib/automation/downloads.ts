@@ -44,6 +44,7 @@ export async function downloadArtifact(artifact: DownloadArtifact) {
   document.body.appendChild(link)
   link.click()
   link.remove()
+  window.dispatchEvent(new CustomEvent('agentflow:download-complete', { detail: { name: artifact.name } }))
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 

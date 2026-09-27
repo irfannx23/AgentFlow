@@ -31,15 +31,11 @@ import type { Tables } from "@/lib/supabase/types";
 import {
   downloadArtifact,
   downloadProjectZip,
-  safeFileName,
-  textPdf,
   workflowPng,
   type DownloadArtifact,
 } from "@/lib/automation/downloads";
 import { isWorkflowGraph } from "@/lib/automation/types";
 import { n8nValidationIssues } from "@/lib/automation/exporters/n8n";
-import { layoutWorkflowGraph } from "@/lib/automation/layout";
-import { optimizeWorkflowGraph } from "@/lib/automation/quality";
 import { useDialogFocus } from "@/components/use-dialog-focus";
 
 type AIArtifacts = {
@@ -252,7 +248,6 @@ export function ConversationDownloadsModal({
 } & AIArtifacts) {
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"downloads" | "guide">("downloads");
-  const [includeRequirementsPdf, setIncludeRequirementsPdf] = useState(false);
   const automaticDownloadStarted = useRef(false);
   useDialogFocus<HTMLElement>(close);
   const packageData = useMemo(() => {
@@ -267,7 +262,6 @@ export function ConversationDownloadsModal({
         }>,
       };
     const graph = workflow.graph;
-    const positionedGraph = layoutWorkflowGraph(optimizeWorkflowGraph(graph));
     const answers =
       requirements.answers &&
       typeof requirements.answers === "object" &&
@@ -307,7 +301,7 @@ export function ConversationDownloadsModal({
           )
           .join("\n\n")
       : "# This workflow does not require environment variables.\n";
-    const readme = `# ${project.name}\n\n## Overview\n\n${graph.description}\n\n## Requirements\n\nBusiness problem: ${requirements.business_problem}\n\n${requirementsOverview}\n\n## Setup\n\n1. Import production-workflow.json into n8n.\n2. Configure the required credentials and environment variables.\n3. Test every workflow branch before activation.\n\n## APIs\n\n${graph.credentials.length ? graph.credentials.map((item) => `- ${item.service}: ${item.description}`).join("\n") : "- No external API credentials are declared."}\n\n## Environment Variables\n\n${environment.length ? environment.map((item) => `- ${String(item.name)}: ${String(item.description ?? "")}`).join("\n") : "- No environment variables are required."}\n\n## Deployment\n\nImport the production workflow, map credentials, validate configuration, execute a test run, and activate only after successful verification.\n\n## Testing\n\nVerify the trigger, every decision branch, external integration, retry behavior, and failure handling before production use.\n\n## Future Updates\n\nContinue the project conversation in AgentFlow to make targeted improvements and create a new validated version.\n`;
+    const readme = `# ${project.name}\n\n## Overview\n\n${graph.description}\n\n## Requirements\n\nBusiness problem: ${requirements.business_problem}\n\n${requirementsOverview}\n\n## Setup\n\n1. Import workflow.json into n8n.\n2. Configure the required credentials and environment variables.\n3. Test every workflow branch before activation.\n\n## APIs\n\n${graph.credentials.length ? graph.credentials.map((item) => `- ${item.service}: ${item.description}`).join("\n") : "- No external API credentials are declared."}\n\n## Environment Variables\n\n${environment.length ? environment.map((item) => `- ${String(item.name)}: ${String(item.description ?? "")}`).join("\n") : "- No environment variables are required."}\n\n## Deployment\n\nImport the production workflow, map credentials, validate configuration, execute a test run, and activate only after successful verification.\n\n## Testing\n\nVerify the trigger, every decision branch, external integration, retry behavior, and failure handling before production use.\n\n## Future Updates\n\nContinue the project conversation to diagnose failures, request targeted repairs, and create a new validated version without overwriting this one.\n`;
     const requirementsPreview = (
       <div className="chat-download-preview">
         <h3>Business problem</h3>
@@ -342,7 +336,7 @@ export function ConversationDownloadsModal({
         </div>
       </div>
     );
-    const files: PreparedFile[] = [
+    const readmeFile: PreparedFile =
       {
         artifact: {
           name: "README.md",
@@ -353,7 +347,8 @@ export function ConversationDownloadsModal({
         description:
           "Overview, setup, APIs, environment, deployment, testing, and future updates.",
         preview: <RichText value={readme} />,
-      },
+      };
+    const requirementsFile: PreparedFile =
       {
         artifact: {
           name: "requirements.md",
@@ -363,7 +358,8 @@ export function ConversationDownloadsModal({
         title: "Requirements",
         description: "Confirmed business requirements and assumptions.",
         preview: requirementsPreview,
-      },
+      };
+    const environmentFile: PreparedFile =
       {
         artifact: {
           name: ".env.example",
@@ -390,17 +386,8 @@ export function ConversationDownloadsModal({
             )}
           </div>
         ),
-      },
-      {
-        artifact: {
-          name: "workflow.json",
-          data: JSON.stringify(positionedGraph, null, 2),
-          mimeType: "application/json",
-        },
-        title: "Internal Workflow",
-        description: `${graph.nodes.length} validated nodes and ${graph.edges.length} connections.`,
-        preview: workflowPreview,
-      },
+      };
+    const workflowDiagramFile: PreparedFile =
       {
         artifact: {
           name: "workflow.png",
@@ -411,8 +398,9 @@ export function ConversationDownloadsModal({
         description:
           "High-resolution diagram generated from the validated graph.",
         preview: workflowPreview,
-      },
-    ];
+      };
+    const files: PreparedFile[] = [readmeFile, environmentFile];
+    const advanced: PreparedFile[] = [requirementsFile, workflowDiagramFile];
     if (workflow.deployment_guide?.trim())
       files.push({
         artifact: {
@@ -425,7 +413,7 @@ export function ConversationDownloadsModal({
         preview: <RichText value={workflow.deployment_guide} />,
       });
     if (tests.length)
-      files.push({
+      advanced.push({
         artifact: {
           name: "testing-checklist.md",
           data: `# Testing checklist\n\n${tests.map((item) => `- [ ] ${item}`).join("\n")}\n`,
@@ -445,7 +433,7 @@ export function ConversationDownloadsModal({
         ),
       });
     if (workflow.explanation?.trim())
-      files.push({
+      advanced.push({
         artifact: {
           name: "architecture-review.md",
           data: workflow.explanation,
@@ -458,7 +446,7 @@ export function ConversationDownloadsModal({
     if (latestExport)
       files.push({
         artifact: {
-          name: `${safeFileName(project.name)}.json`,
+          name: "workflow.json",
           data: JSON.stringify(latestExport.payload, null, 2),
           mimeType: "application/json",
         },
@@ -478,62 +466,46 @@ export function ConversationDownloadsModal({
         version: latestExport.workflow_version,
         validation: "Passed",
       });
-    files.forEach((file) => {
+    const coreOrder = ["workflow.json", "README.md", "deployment-guide.md", ".env.example"];
+    const advancedOrder = ["requirements.md", "architecture-review.md", "testing-checklist.md", "workflow.png"];
+    files.sort((a, b) => coreOrder.indexOf(a.artifact.name) - coreOrder.indexOf(b.artifact.name));
+    advanced.sort((a, b) => advancedOrder.indexOf(a.artifact.name) - advancedOrder.indexOf(b.artifact.name));
+    [...files, ...advanced].forEach((file) => {
       file.generatedAt ??= workflow.updated_at;
       file.version ??= workflow.version;
       file.validation ??= "Passed";
     });
-    const advanced: PreparedFile[] = [];
-    advanced.push(
-      ...files.filter((file) =>
-        [
-          "deployment-guide.md",
-          "testing-checklist.md",
-          "architecture-review.md",
-        ].includes(file.artifact.name),
-      ),
-    );
-    if (includeRequirementsPdf)
-      advanced.push({
-        artifact: {
-          name: "requirements.pdf",
-          data: textPdf(
-            `${project.name} Requirements`,
-            `${requirements.business_problem}\n\n${requirementsOverview}`,
-          ),
-          mimeType: "application/pdf",
-        },
-        title: "Requirements PDF",
-        description: "Shareable requirements document.",
-        preview: requirementsPreview,
-      });
     return { files, advanced, credentials: graph.credentials };
-  }, [exports, includeRequirementsPdf, project.name, requirements, workflow]);
+  }, [exports, project.name, requirements, workflow]);
   const allFiles = useMemo(
     () => [...packageData.files, ...packageData.advanced],
     [packageData.advanced, packageData.files],
   );
   const selectedFile = allFiles.find((file) => file.artifact.name === selected);
   const viewingZip = selected === "Project.zip";
-  const downloadZip = useCallback(() =>
-    void downloadProjectZip(
+  const downloadZip = useCallback(async () => {
+    await downloadProjectZip(
       `${project.name}-project`,
       allFiles.map((file) => file.artifact),
-    ), [allFiles, project.name]);
+    );
+  }, [allFiles, project.name]);
+  const downloadFile = useCallback(async (file: DownloadArtifact) => {
+    await downloadArtifact(file);
+  }, []);
   useEffect(() => {
     if (!downloadOnOpen || !allFiles.length || automaticDownloadStarted.current) return;
     automaticDownloadStarted.current = true;
-    downloadZip();
+    void downloadZip();
   }, [allFiles.length, downloadOnOpen, downloadZip]);
   const advancedRows: Array<{
-    stage: AdvancedStage | "requirements-pdf";
+    stage: AdvancedStage | "requirements" | "workflow";
     title: string;
     file: string;
   }> = [
     {
-      stage: "deployment",
-      title: "Deployment Guide",
-      file: "deployment-guide.md",
+      stage: "requirements",
+      title: "Requirements",
+      file: "requirements.md",
     },
     {
       stage: "testing",
@@ -546,9 +518,9 @@ export function ConversationDownloadsModal({
       file: "architecture-review.md",
     },
     {
-      stage: "requirements-pdf",
-      title: "Requirements PDF",
-      file: "requirements.pdf",
+      stage: "workflow",
+      title: "Workflow Diagram",
+      file: "workflow.png",
     },
   ];
   return (
@@ -635,7 +607,7 @@ export function ConversationDownloadsModal({
               <details>
                 <summary>Import Workflow</summary>
                 <ol>
-                  <li>Download {safeFileName(project.name)}.json.</li>
+                  <li>Download workflow.json.</li>
                   <li>Open n8n and choose Import from File.</li>
                   <li>Map each referenced credential.</li>
                   <li>Save and run a manual test before activation.</li>
@@ -708,7 +680,7 @@ export function ConversationDownloadsModal({
                   onClick={
                     viewingZip
                       ? downloadZip
-                      : () => void downloadArtifact(selectedFile!.artifact)
+                      : () => void downloadFile(selectedFile!.artifact)
                   }
                 >
                   <Download size={14} />
@@ -775,7 +747,7 @@ export function ConversationDownloadsModal({
                           View
                         </button>
                         <button
-                          onClick={() => void downloadArtifact(file.artifact)}
+                          onClick={() => void downloadFile(file.artifact)}
                         >
                           <Download size={13} />
                           Download
@@ -807,18 +779,15 @@ export function ConversationDownloadsModal({
                 </div>
               </section>
               <details className="advanced-documentation">
-                <summary>Advanced Documentation</summary>
-                <p>Generate detailed documents only when you need them.</p>
+                <summary>Show Advanced Files</summary>
+                <p>Requirements, review, testing, and visual documentation.</p>
                 {advancedRows.map((row) => {
                   const available = packageData.advanced.find(
                     (file) => file.artifact.name === row.file,
                   );
-                  const status =
-                    row.stage === "requirements-pdf"
-                      ? includeRequirementsPdf
-                        ? "complete"
-                        : "pending"
-                      : advancedStatus[row.stage];
+                  const status = row.stage === "requirements" || row.stage === "workflow"
+                    ? available ? "complete" : "pending"
+                    : advancedStatus[row.stage];
                   const busy = [
                     "queued",
                     "generating",
@@ -847,7 +816,7 @@ export function ConversationDownloadsModal({
                           </button>
                           <button
                             onClick={() =>
-                              void downloadArtifact(available.artifact)
+                              void downloadFile(available.artifact)
                             }
                           >
                             <Download size={13} />
@@ -858,8 +827,8 @@ export function ConversationDownloadsModal({
                         <button
                           disabled={busy}
                           onClick={() =>
-                            row.stage === "requirements-pdf"
-                              ? setIncludeRequirementsPdf(true)
+                            row.stage === "requirements" || row.stage === "workflow"
+                              ? undefined
                               : generateAdvanced(row.stage)
                           }
                         >
