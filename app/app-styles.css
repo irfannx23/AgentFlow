@@ -237,7 +237,8 @@
 }
 .design-v2 .integration-explorer-modal {
   width: min(980px, calc(100vw - 32px));
-  max-height: min(780px, calc(100dvh - 40px));
+  height: min(780px, 84dvh);
+  max-height: 84dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -250,11 +251,14 @@
   animation: modal-card-in .22s cubic-bezier(.2, .8, .2, 1);
 }
 .design-v2 .integration-explorer-header {
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
   padding: 24px 26px 19px;
+  flex: none;
   border-bottom: 1px solid rgba(39, 52, 41, .075);
 }
 .design-v2 .integration-explorer-heading {
@@ -305,10 +309,14 @@
   color: #344037;
 }
 .design-v2 .integration-explorer-toolbar {
+  position: sticky;
+  z-index: 2;
+  top: 0;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 15px 26px;
+  flex: none;
   border-bottom: 1px solid rgba(39, 52, 41, .065);
   background: rgba(252, 253, 251, .62);
 }
@@ -351,6 +359,7 @@
 }
 .design-v2 .integration-explorer-body {
   min-height: 0;
+  flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 23px 26px 30px;
@@ -423,6 +432,8 @@
   background: linear-gradient(145deg, #f0f6ea, #fff);
   color: #6e9635;
 }
+.design-v2 .integration-explorer-icon.branded { background: #fff; color: #253027; }
+.design-v2 .integration-explorer-icon img { width: 21px; height: 21px; display: block; object-fit: contain; }
 .design-v2 .integration-explorer-card-copy { min-width: 0; }
 .design-v2 .integration-explorer-card-title {
   display: flex;
@@ -438,18 +449,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.design-v2 .integration-explorer-card-title span {
+.design-v2 .integration-explorer-card-title .integration-status {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   flex: none;
   padding: 3px 5px;
   border-radius: 999px;
-  background: rgba(145, 215, 44, .09);
-  color: #6f9537;
+  background: rgba(91, 111, 206, .09);
+  color: #5b6fce;
   font-size: 7px;
   font-weight: 700;
 }
+.design-v2 .integration-explorer-card-title .integration-status.coming-soon { background: rgba(120, 130, 122, .1); color: #737d75; }
+.design-v2 .integration-explorer-card-title .integration-status.enterprise { background: rgba(126, 91, 176, .1); color: #74519f; }
+.design-v2 .integration-explorer-backdrop.closing { animation: integration-backdrop-out .18s ease-in forwards; }
+.design-v2 .integration-explorer-modal.closing { animation: integration-modal-out .18s ease-in forwards; }
+@keyframes integration-backdrop-out { to { opacity: 0; } }
+@keyframes integration-modal-out { to { opacity: 0; transform: translateY(7px) scale(.985); } }
 .design-v2 .integration-explorer-card p {
   display: -webkit-box;
   overflow: hidden;
@@ -498,6 +515,7 @@
   .design-v2 .integration-explorer-backdrop { padding: 8px; }
   .design-v2 .integration-explorer-modal {
     width: calc(100vw - 16px);
+    height: min(760px, calc(100dvh - 16px));
     max-height: calc(100dvh - 16px);
     border-radius: 19px;
   }

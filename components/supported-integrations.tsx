@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   Bot,
   BrainCircuit,
   CalendarClock,
-  CheckCircle2,
   Cloud,
   Code2,
   CreditCard,
@@ -52,21 +51,35 @@ const iconMap: Record<IntegrationIcon, ComponentType<LucideProps>> = {
 };
 
 export function IntegrationCard({ integration }: { integration: IntegrationDefinition }) {
-  const Icon = iconMap[integration.icon];
+  const statusLabel = integration.status === "coming-soon" ? "Coming Soon" : integration.status === "enterprise" ? "Enterprise" : integration.status === "beta" ? "Beta" : null;
 
   return (
     <article className="integration-explorer-card">
-      <div className="integration-explorer-icon" aria-hidden="true">
-        <Icon size={20} strokeWidth={1.8} />
-      </div>
+      <IntegrationBrand integration={integration} />
       <div className="integration-explorer-card-copy">
         <div className="integration-explorer-card-title">
           <h4>{integration.name}</h4>
-          <span><CheckCircle2 size={12} aria-hidden="true" /> Supported</span>
+          {statusLabel && <span className={`integration-status ${integration.status}`}>{statusLabel}</span>}
         </div>
         <p>{integration.description}</p>
       </div>
     </article>
+  );
+}
+
+function IntegrationBrand({ integration }: { integration: IntegrationDefinition }) {
+  const Icon = iconMap[integration.icon];
+  const [failed, setFailed] = useState(false);
+  const showLogo = Boolean(integration.logoPath) && !failed;
+
+  return (
+    <div className={`integration-explorer-icon${showLogo ? " branded" : ""}`} aria-hidden="true">
+      {showLogo ? (
+        <img src={integration.logoPath ?? ""} alt="" width={21} height={21} onError={() => setFailed(true)} />
+      ) : (
+        <Icon size={20} strokeWidth={1.8} />
+      )}
+    </div>
   );
 }
 
@@ -82,7 +95,19 @@ export function SupportedIntegrationsModal({ open, onClose }: SupportedIntegrati
 
 function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
-  const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
+  const [closing, setClosing] = useState(false);
+  const requestClose = useCallback(() => setClosing(true), []);
+  const dialogRef = useDialogFocus<HTMLDivElement>(requestClose);
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+  useEffect(() => {
+    if (!closing) return;
+    const timer = window.setTimeout(onClose, 180);
+    return () => window.clearTimeout(timer);
+  }, [closing, onClose]);
   const normalizedQuery = query.trim().toLowerCase();
   const filteredIntegrations = useMemo(() => {
     if (!normalizedQuery) return integrationRegistry;
@@ -91,6 +116,8 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
         integration.name,
         integration.description,
         integration.category,
+        integration.authenticationType,
+        ...integration.supportedOperations,
         ...(integration.keywords ?? []),
       ].some((value) => value.toLowerCase().includes(normalizedQuery)),
     );
@@ -98,10 +125,10 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
   const featuredIntegrations = integrationRegistry.filter((integration) => integration.featured);
 
   return (
-    <div className="integration-explorer-backdrop" onMouseDown={onClose}>
+    <div className={`integration-explorer-backdrop${closing ? " closing" : ""}`} onMouseDown={requestClose}>
       <div
         ref={dialogRef}
-        className="integration-explorer-modal"
+        className={`integration-explorer-modal${closing ? " closing" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="supported-integrations-title"
@@ -118,7 +145,7 @@ function SupportedIntegrationsDialog({ onClose }: { onClose: () => void }) {
               <p>AgentFlow works across AI providers, SaaS apps, databases, APIs, and developer tools.</p>
             </div>
           </div>
-          <button className="integration-explorer-close" type="button" onClick={onClose} aria-label="Close supported integrations">
+          <button className="integration-explorer-close" type="button" onClick={requestClose} aria-label="Close supported integrations">
             <X size={19} />
           </button>
         </header>
