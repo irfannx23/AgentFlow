@@ -35,6 +35,10 @@ import type {
 import { isWorkflowGraph } from "@/lib/automation/types";
 import { n8nValidationIssues } from "@/lib/automation/exporters/n8n";
 import {
+  newLifecycleRequestId,
+  reportClientLifecycle,
+} from "@/lib/observability/client";
+import {
   answersWithToolPlan,
   parseToolPlan,
   toolPlanFromAnswers,
@@ -991,7 +995,12 @@ export function ConversationWorkspace({
       check();
     });
 
-  const generate = async (target: Project, body: Record<string, unknown>) => {
+  const generate = async (
+    target: Project,
+    body: Record<string, unknown>,
+    lifecycleRequestId?: string,
+    lifecycleToken?: string,
+  ) => {
     if (!user) throw new Error("Sign in to continue.");
     if (!selectedModel)
       throw new Error(
@@ -1000,8 +1009,9 @@ export function ConversationWorkspace({
     const response = await fetch("/api/intelligence/generate", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${await user.getIdToken()}`,
+        authorization: `Bearer ${lifecycleToken ?? (await user.getIdToken())}`,
         "content-type": "application/json",
+        ...(lifecycleRequestId ? { "x-request-id": lifecycleRequestId } : {}),
       },
       body: JSON.stringify({
         projectId: target.id,
@@ -1033,6 +1043,8 @@ export function ConversationWorkspace({
     target: Project,
     history: typeof conversations.messages,
     userAnswer: string,
+    lifecycleRequestId: string,
+    lifecycleToken: string,
   ) => {
     const questionsAsked = clarificationCount(history);
     const questionsRemaining = Math.max(0, 3 - questionsAsked);
@@ -1067,7 +1079,7 @@ Rules:
 Current derived requirements: ${JSON.stringify(ai.projectId === target.id ? ai.requirements : null)}
 
 ${transcript}`,
-    });
+    }, lifecycleRequestId, lifecycleToken);
     const snapshot = requirementSnapshot(
       jsonObject(String(extracted.text ?? "")),
     );
@@ -1088,23 +1100,72 @@ ${transcript}`,
     target: Project,
     snapshot: RequirementSnapshot,
     userAnswer: string,
+    lifecycleRequestId: string,
+    lifecycleToken: string,
   ) => {
     const answers = {
       ...snapshot.answers,
       assumptions: snapshot.assumptions.join("\n"),
     };
-    const requirements = await ai.saveRequirements({
-      id: ai.projectId === target.id ? ai.requirements?.id : undefined,
-      project_id: target.id,
-      business_problem:
-        snapshot.businessProblem || target.description || userAnswer,
-      answers,
-      status: snapshot.complete ? "planning" : "gathering",
+    void reportClientLifecycle(lifecycleToken, {
+      requestId: lifecycleRequestId,
+      stage: "requirements-persistence",
+      event: "requirements.persistence_started",
+      projectId: target.id,
+      status: "started",
+      context: { requirementStatus: snapshot.complete ? "planning" : "gathering" },
     });
-    await onUpdate(target.id, {
-      description: requirements.business_problem,
-      phase: snapshot.complete ? "Workflow Planning" : "Requirements",
+    let requirements;
+    try {
+      requirements = await ai.saveRequirements({
+        id: ai.projectId === target.id ? ai.requirements?.id : undefined,
+        project_id: target.id,
+        business_problem:
+          snapshot.businessProblem || target.description || userAnswer,
+        answers,
+        status: snapshot.complete ? "planning" : "gathering",
+      });
+    } catch (error) {
+      await reportClientLifecycle(lifecycleToken, {
+        requestId: lifecycleRequestId,
+        stage: "requirements-persistence",
+        event: "requirements.persistence_failed",
+        projectId: target.id,
+        status: "failed",
+        error,
+        context: {
+          requirementStatus: snapshot.complete ? "planning" : "gathering",
+          failingFile: "lib/supabase/intelligence.ts",
+          failingLine: ai.projectId === target.id && ai.requirements?.id ? 162 : 163,
+        },
+      });
+      throw error;
+    }
+    void reportClientLifecycle(lifecycleToken, {
+      requestId: lifecycleRequestId,
+      stage: "requirements-persistence",
+      event: "requirements.persistence_completed",
+      projectId: target.id,
+      status: "completed",
+      context: { requirementStatus: requirements.status },
     });
+    try {
+      await onUpdate(target.id, {
+        description: requirements.business_problem,
+        phase: snapshot.complete ? "Workflow Planning" : "Requirements",
+      });
+    } catch (error) {
+      await reportClientLifecycle(lifecycleToken, {
+        requestId: lifecycleRequestId,
+        stage: "project-persistence",
+        event: "project.requirements_stage_update_failed",
+        projectId: target.id,
+        status: "failed",
+        error,
+        context: { failingFile: "components/workspace-state.tsx", failingLine: 205 },
+      });
+      throw error;
+    }
     return requirements;
   };
 
@@ -1136,15 +1197,52 @@ ${transcript}`,
       revealTimerRef.current = null;
     }
     setStreamCitations([]);
+    const lifecycleRequestId = newLifecycleRequestId();
+    let lifecycleToken = "";
+    let lifecycleProjectId = project?.id;
     try {
+      lifecycleToken = await user.getIdToken();
+      void reportClientLifecycle(lifecycleToken, {
+        requestId: lifecycleRequestId,
+        stage: "authentication",
+        event: "interview.authentication_completed",
+        status: "completed",
+      });
       const attachedDocuments = files.length > 0;
-      const target =
-        project ??
-        (await createProject({
-          name: projectName(prompt),
-          description: prompt,
-          phase: "Business Problem",
-        }));
+      let target = project;
+      if (!target) {
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "project-creation",
+          event: "project.creation_started",
+          status: "started",
+        });
+        try {
+          target = await createProject({
+            name: projectName(prompt),
+            description: prompt,
+            phase: "Business Problem",
+          });
+        } catch (error) {
+          await reportClientLifecycle(lifecycleToken, {
+            requestId: lifecycleRequestId,
+            stage: "project-creation",
+            event: "project.creation_failed",
+            status: "failed",
+            error,
+            context: { failingFile: "components/workspace-state.tsx", failingLine: 180 },
+          });
+          throw error;
+        }
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "project-creation",
+          event: "project.creation_completed",
+          projectId: target.id,
+          status: "completed",
+        });
+        lifecycleProjectId = target.id;
+      }
       const history =
         project?.id === target.id && conversations.projectId === target.id
           ? conversations.messages
@@ -1178,7 +1276,7 @@ ${transcript}`,
           agentId: "consultant",
           task: "change-plan",
           prompt: `Plan the smallest safe project update for this request: ${prompt}`,
-        });
+        }, lifecycleRequestId, lifecycleToken);
         plannedChange = changePlan(planned.changePlan);
         if (
           plannedChange.intent !== "explain" &&
@@ -1209,7 +1307,7 @@ ${transcript}`,
             agentId: "consultant",
             task: "tool-plan",
             prompt: `Update the existing automation blueprint for this request while preserving unaffected capability selections: ${prompt}`,
-          });
+          }, lifecycleRequestId, lifecycleToken);
           plannedTools = parseToolPlan(generated.toolPlan);
           const ready = toolPlanReady(plannedTools);
           await ai.saveRequirements({
@@ -1218,6 +1316,14 @@ ${transcript}`,
             business_problem: ai.requirements.business_problem,
             answers: answersWithToolPlan(ai.requirements.answers, plannedTools),
             status: ready ? "ready" : "planning",
+          });
+          void reportClientLifecycle(lifecycleToken, {
+            requestId: lifecycleRequestId,
+            stage: "tool-planning",
+            event: "tool_planning.persistence_completed",
+            projectId: target.id,
+            status: "completed",
+            context: { requirementStatus: ready ? "ready" : "planning" },
           });
           plannedToolsPersisted = true;
           updatedPlanNeedsReview = !ready;
@@ -1232,11 +1338,23 @@ ${transcript}`,
         !requirementsCaptured ||
         Boolean(plannedChange?.affectedArtifacts.includes("requirements"));
       const snapshot = shouldUpdateRequirements
-        ? await extractRequirements(target, history, prompt)
+        ? await extractRequirements(
+            target,
+            history,
+            prompt,
+            lifecycleRequestId,
+            lifecycleToken,
+          )
         : null;
       const savedRequirements =
         snapshot && !snapshot.offTopic
-          ? await saveRequirementSnapshot(target, snapshot, prompt)
+          ? await saveRequirementSnapshot(
+              target,
+              snapshot,
+              prompt,
+              lifecycleRequestId,
+              lifecycleToken,
+            )
           : null;
       const initialCompletion = Boolean(
         snapshot?.complete && !interviewWasComplete,
@@ -1259,7 +1377,7 @@ ${transcript}`,
             prompt: stackPlanning
               ? `Update the production automation blueprint using this tool-related request: ${prompt}`
               : "Analyze the confirmed requirements and create the complete production automation blueprint.",
-          });
+          }, lifecycleRequestId, lifecycleToken);
           plannedTools = parseToolPlan(generated.toolPlan);
         }
         const source = savedRequirements ?? ai.requirements;
@@ -1270,6 +1388,14 @@ ${transcript}`,
             business_problem: source.business_problem,
             answers: answersWithToolPlan(source.answers, plannedTools),
             status: "planning",
+          });
+          void reportClientLifecycle(lifecycleToken, {
+            requestId: lifecycleRequestId,
+            stage: "tool-planning",
+            event: "tool_planning.persistence_completed",
+            projectId: target.id,
+            status: "completed",
+            context: { requirementStatus: "planning" },
           });
       }
       const guidance = snapshot?.offTopic
@@ -1285,7 +1411,8 @@ ${transcript}`,
               : "Answer the automation question naturally and concisely. Do not include generated artifacts, workflow JSON, deployment guides, or background-generation progress.";
       setStatus("Writing response...");
       await streamAIResponse({
-        token: await user.getIdToken(),
+        token: lifecycleToken,
+        requestId: lifecycleRequestId,
         body: {
           projectId: target.id,
           conversationId: conversation.id,
@@ -1360,6 +1487,15 @@ ${transcript}`,
             requestedAdvanced[stage],
         );
         if (targetedStages.length)
+          void reportClientLifecycle(lifecycleToken, {
+            requestId: lifecycleRequestId,
+            stage: "artifact-scheduling",
+            event: "artifacts.scheduled",
+            projectId: target.id,
+            status: "scheduled",
+            context: { stages: targetedStages },
+          });
+        if (targetedStages.length)
           void artifactGeneration.start(
             target,
             onUpdate,
@@ -1377,6 +1513,15 @@ ${transcript}`,
           );
       }
     } catch (value) {
+      if (lifecycleToken)
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "interview",
+          event: "interview.failed",
+          projectId: lifecycleProjectId,
+          status: "failed",
+          error: value,
+        });
       setError(
         value instanceof Error
           ? value.message
@@ -1428,13 +1573,37 @@ ${transcript}`,
       : null;
   const saveToolPlan = async (plan: ToolPlan) => {
     if (!project || !ai.requirements) return;
-    await ai.saveRequirements({
-      id: ai.requirements.id,
-      project_id: project.id,
-      business_problem: ai.requirements.business_problem,
-      answers: answersWithToolPlan(ai.requirements.answers, plan),
-      status: "planning",
-    });
+    const lifecycleRequestId = newLifecycleRequestId();
+    const lifecycleToken = user ? await user.getIdToken() : "";
+    try {
+      await ai.saveRequirements({
+        id: ai.requirements.id,
+        project_id: project.id,
+        business_problem: ai.requirements.business_problem,
+        answers: answersWithToolPlan(ai.requirements.answers, plan),
+        status: "planning",
+      });
+      if (lifecycleToken)
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "tool-planning",
+          event: "tool_planning.persistence_completed",
+          projectId: project.id,
+          status: "completed",
+          context: { requirementStatus: "planning" },
+        });
+    } catch (error) {
+      if (lifecycleToken)
+        await reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "tool-planning",
+          event: "tool_planning.persistence_failed",
+          projectId: project.id,
+          status: "failed",
+          error,
+        });
+      throw error;
+    }
   };
   const finalizeToolPlan = async (plan: ToolPlan) => {
     if (
@@ -1446,7 +1615,10 @@ ${transcript}`,
       return;
     setBusy(true);
     setError("");
+    const lifecycleRequestId = newLifecycleRequestId();
+    let lifecycleToken = "";
     try {
+      lifecycleToken = user ? await user.getIdToken() : "";
       const finalized = { ...plan, finalizedAt: new Date().toISOString() };
       await ai.saveRequirements({
         id: ai.requirements.id,
@@ -1485,6 +1657,17 @@ ${transcript}`,
             "export",
           ] as ArtifactStage[])
         : undefined;
+      if (lifecycleToken)
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "artifact-scheduling",
+          event: "artifacts.scheduled",
+          projectId: project.id,
+          status: "scheduled",
+          context: {
+            stages: stages ?? ["workflow", "deployment", "environment", "testing", "review", "export"],
+          },
+        });
       void artifactGeneration.start(project, onUpdate, stages, selectedModel, {
         summary: currentGraph
           ? "Finalized imported workflow stack"
@@ -1494,6 +1677,15 @@ ${transcript}`,
         author: "ai",
       });
     } catch (value) {
+      if (lifecycleToken)
+        void reportClientLifecycle(lifecycleToken, {
+          requestId: lifecycleRequestId,
+          stage: "tool-planning",
+          event: "tool_planning.finalization_failed",
+          projectId: project.id,
+          status: "failed",
+          error: value,
+        });
       setError(
         value instanceof Error
           ? value.message

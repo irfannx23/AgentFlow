@@ -10,6 +10,7 @@ import { isWorkflowGraph, type WorkflowGraph } from '@/lib/automation/types'
 import type { ConnectionModel } from '@/lib/connections/types'
 import type { Json, Tables } from '@/lib/supabase/types'
 import { getAutomationRequirements, getAutomationWorkflow, listAutomationExports } from '@/lib/supabase/intelligence'
+import { newLifecycleRequestId, reportClientLifecycle } from '@/lib/observability/client'
 
 type UpdateProject = (projectId: string, values: { description?: string; phase?: string }) => Promise<void>
 type WorkflowRow = Tables<'automation_workflows'>
@@ -66,11 +67,11 @@ export function useArtifactGeneration() {
     return connections.defaultModel ?? connections.models.find(item => connected.has(item.provider)) ?? null
   }, [connections.connections, connections.defaultModel, connections.models])
 
-  const request = useCallback(async (project: Project, model: ConnectionModel, body: Record<string, unknown>) => {
+  const request = useCallback(async (project: Project, model: ConnectionModel, body: Record<string, unknown>, requestId?: string, tokenOverride?: string) => {
     if (!user) throw new Error('Sign in to generate project artifacts.')
     const response = await fetch('/api/intelligence/generate', {
       method: 'POST',
-      headers: { authorization: `Bearer ${await user.getIdToken()}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${tokenOverride ?? await user.getIdToken()}`, 'content-type': 'application/json', ...(requestId ? { 'x-request-id': requestId } : {}) },
       body: JSON.stringify({ projectId: project.id, provider: model.provider, model: model.id, ...body }),
     })
     const payload = await response.json()
@@ -105,10 +106,13 @@ export function useArtifactGeneration() {
   }, [ai])
 
   const start = useCallback((project: Project, updateProject: UpdateProject, only?: ArtifactStage|ArtifactStage[], modelOverride?: ConnectionModel | null, change: GenerationChange = {}) => {
+    const lifecycleRequestId = newLifecycleRequestId()
     queue.current = queue.current.catch(() => undefined).then(async () => {
+      const lifecycleToken = user ? await user.getIdToken() : ''
       const model = preferredModel(modelOverride)
       if (!model) throw new Error('Connect an AI provider before generating artifacts.')
       const stages: ArtifactStage[] = only ? (Array.isArray(only) ? [...new Set(only)] : [only]) : ['workflow','deployment','environment','testing','review','export']
+      if (lifecycleToken) void reportClientLifecycle(lifecycleToken, { requestId: lifecycleRequestId, stage: 'artifact-scheduling', event: 'artifacts.execution_started', projectId: project.id, status: 'started', context: { stages } })
       if (!only) stages.forEach((stage, index) => ai.setArtifactJob(project.id, stage, index === 0 ? 'generating' : 'queued'))
       let workflow: WorkflowRow | null = ai.projectId === project.id ? ai.workflow : null
       if (!workflow) workflow = await getAutomationWorkflow(project.id)
@@ -125,7 +129,7 @@ export function useArtifactGeneration() {
       if (stages.includes('workflow')) {
         try {
           const generatedWorkflow = await retry(project.id, 'workflow', async () => {
-            const generated = await request(project, model, { agentId: 'designer', task: 'workflow', prompt: 'Generate the complete provider-neutral internal workflow graph from the saved requirements and indexed project knowledge.' })
+            const generated = await request(project, model, { agentId: 'designer', task: 'workflow', prompt: 'Generate the complete provider-neutral internal workflow graph from the saved requirements and indexed project knowledge.' }, lifecycleRequestId, lifecycleToken)
             ai.setArtifactJob(project.id, 'workflow', 'validating')
             if (!isWorkflowGraph(generated.workflow)) throw new Error('The generated internal workflow failed schema validation.')
             const validatedGraph:WorkflowGraph = generated.workflow
@@ -142,6 +146,7 @@ export function useArtifactGeneration() {
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Workflow generation failed.'
           ai.setArtifactJob(project.id, 'workflow', 'error', message)
+          if (lifecycleToken) void reportClientLifecycle(lifecycleToken, { requestId: lifecycleRequestId, stage: 'artifact-generation', event: 'artifact.failed', projectId: project.id, status: 'failed', error, context: { artifact: 'workflow' } })
           if (!only) return
           throw error
         }
@@ -157,10 +162,10 @@ export function useArtifactGeneration() {
         workflow = await ai.saveWorkflow({ id: workflow!.id, project_id: project.id, name: workflow!.name, graph: workflow!.graph, version: workflow!.version, ...patch })
       }
       const jobs: Array<{ stage: ArtifactStage; run: () => Promise<void> }> = [
-        { stage: 'deployment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'deployment', prompt: 'Create only the deployment guide for the persisted workflow.' }); await savePatch({ deployment_guide: String(value.deploymentGuide ?? '') }) } },
-        { stage: 'environment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'environment', prompt: 'Generate only the environment variable manifest required by the persisted workflow.' }); await savePatch({ environment_variables: (value.environmentVariables ?? []) as Json }) } },
-        { stage: 'testing', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'testing', prompt: 'Generate only the testing checklist for the persisted workflow.' }); await savePatch({ testing_checklist: (value.testingChecklist ?? []) as Json }) } },
-        { stage: 'review', run: async () => { const value = await request(project, model, { agentId: 'reviewer', task: 'review', prompt: 'Review only the persisted internal workflow architecture. Report risks, failure modes, and concrete corrections.' }); await savePatch({ explanation: String(value.review ?? ''), status: 'reviewed' }); await updateProject(project.id, { phase: 'Review' }) } },
+        { stage: 'deployment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'deployment', prompt: 'Create only the deployment guide for the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ deployment_guide: String(value.deploymentGuide ?? '') }) } },
+        { stage: 'environment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'environment', prompt: 'Generate only the environment variable manifest required by the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ environment_variables: (value.environmentVariables ?? []) as Json }) } },
+        { stage: 'testing', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'testing', prompt: 'Generate only the testing checklist for the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ testing_checklist: (value.testingChecklist ?? []) as Json }) } },
+        { stage: 'review', run: async () => { const value = await request(project, model, { agentId: 'reviewer', task: 'review', prompt: 'Review only the persisted internal workflow architecture. Report risks, failure modes, and concrete corrections.' }, lifecycleRequestId, lifecycleToken); await savePatch({ explanation: String(value.review ?? ''), status: 'reviewed' }); await updateProject(project.id, { phase: 'Review' }) } },
         { stage: 'export', run: async () => { ai.setArtifactJob(project.id, 'export', 'validating'); const payload = exportN8n(graph!); const issues = productionExportIssues(graph!, payload); if (issues.length) throw new Error(`Production export validation failed: ${issues.join(' ')}`); latestExport = await ai.saveExport({ workflow_id: workflow!.id, project_id: project.id, platform: 'n8n', workflow_version: workflow!.version, payload }); await updateProject(project.id, { phase: 'Export' }) } },
       ]
       for (const job of jobs.filter(item => stages.includes(item.stage))) {
@@ -169,7 +174,10 @@ export function useArtifactGeneration() {
           ai.setArtifactJob(project.id, job.stage, 'complete')
           notify(project, job.stage)
           await ai.addTimelineEvent({ project_id: project.id, event_type: 'artifact_generated', title: stageLabels[job.stage], description: `${job.stage} completed and passed validation.`, metadata: { stage: job.stage } })
-        } catch { failedStages.add(job.stage) /* The failed stage is isolated; remaining jobs continue. */ }
+        } catch (error) {
+          failedStages.add(job.stage)
+          if (lifecycleToken) void reportClientLifecycle(lifecycleToken, { requestId: lifecycleRequestId, stage: 'artifact-generation', event: 'artifact.failed', projectId: project.id, status: 'failed', error, context: { artifact: job.stage } })
+        }
       }
       if (workflow && graph && failedStages.size === 0) {
         const label = nextVersionLabel(ai.versions[0], change.versionBump)
@@ -190,9 +198,10 @@ export function useArtifactGeneration() {
     }).catch(error => {
       const stage = Array.isArray(only) ? only[0] ?? 'workflow' : only ?? 'workflow'
       ai.setArtifactJob(project.id, stage, 'error', error instanceof Error ? error.message : 'Artifact generation failed.')
+      if (user) void user.getIdToken().then(token => reportClientLifecycle(token, { requestId: lifecycleRequestId, stage: 'artifact-scheduling', event: 'artifacts.execution_failed', projectId: project.id, status: 'failed', error, context: { artifact: stage } })).catch(() => undefined)
     })
     return queue.current
-  }, [ai, preferredModel, request, retry])
+  }, [ai, preferredModel, request, retry, user])
 
   return { start }
 }

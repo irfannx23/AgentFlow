@@ -11,11 +11,12 @@ export type AIStreamEvent =
   | { type: 'text'; text: string }
   | { type: 'citations'; citations: AICitation[] }
   | { type: 'usage'; usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }
-  | { type: 'error'; error: string }
+  | { type: 'error'; error: string; errorId?: string; requestId?: string }
   | { type: string; [key: string]: unknown }
 
 type StreamRequest = {
   token: string
+  requestId?: string
   body: Record<string, unknown>
   onEvent: (event: AIStreamEvent) => void
 }
@@ -29,10 +30,10 @@ function errorMessage(value: unknown): string {
   return 'Unable to start conversation.'
 }
 
-export async function streamAIResponse({ token, body, onEvent }: StreamRequest) {
+export async function streamAIResponse({ token, requestId, body, onEvent }: StreamRequest) {
   const response = await fetch('/api/intelligence/generate', {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(requestId ? { 'x-request-id': requestId } : {}) },
     body: JSON.stringify({ ...body, stream: true }),
   })
   if (!response.ok) {
