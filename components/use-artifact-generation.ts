@@ -11,6 +11,7 @@ import type { ConnectionModel } from '@/lib/connections/types'
 import type { Json, Tables } from '@/lib/supabase/types'
 import { getAutomationRequirements, getAutomationWorkflow, listAutomationExports } from '@/lib/supabase/intelligence'
 import { newLifecycleRequestId, reportClientLifecycle } from '@/lib/observability/client'
+import { PROJECT_STAGE } from '@/lib/projects/lifecycle'
 
 type UpdateProject = (projectId: string, values: { description?: string; phase?: string }) => Promise<void>
 type WorkflowRow = Tables<'automation_workflows'>
@@ -139,7 +140,7 @@ export function useArtifactGeneration() {
           })
           graph = generatedWorkflow.graph
           workflow = generatedWorkflow.workflow
-          await updateProject(project.id, { phase: 'Workflow Generation' })
+          await updateProject(project.id, { phase: PROJECT_STAGE.workflowGeneration })
           ai.setArtifactJob(project.id, 'workflow', 'complete')
           notify(project, 'workflow')
           await ai.addTimelineEvent({ project_id: project.id, event_type: 'artifact_generated', title: stageLabels.workflow, description: `Validated workflow version ${workflow.version} was persisted.`, metadata: { stage: 'workflow' } })
@@ -165,8 +166,8 @@ export function useArtifactGeneration() {
         { stage: 'deployment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'deployment', prompt: 'Create only the deployment guide for the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ deployment_guide: String(value.deploymentGuide ?? '') }) } },
         { stage: 'environment', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'environment', prompt: 'Generate only the environment variable manifest required by the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ environment_variables: (value.environmentVariables ?? []) as Json }) } },
         { stage: 'testing', run: async () => { const value = await request(project, model, { agentId: 'generator', task: 'testing', prompt: 'Generate only the testing checklist for the persisted workflow.' }, lifecycleRequestId, lifecycleToken); await savePatch({ testing_checklist: (value.testingChecklist ?? []) as Json }) } },
-        { stage: 'review', run: async () => { const value = await request(project, model, { agentId: 'reviewer', task: 'review', prompt: 'Review only the persisted internal workflow architecture. Report risks, failure modes, and concrete corrections.' }, lifecycleRequestId, lifecycleToken); await savePatch({ explanation: String(value.review ?? ''), status: 'reviewed' }); await updateProject(project.id, { phase: 'Review' }) } },
-        { stage: 'export', run: async () => { ai.setArtifactJob(project.id, 'export', 'validating'); const payload = exportN8n(graph!); const issues = productionExportIssues(graph!, payload); if (issues.length) throw new Error(`Production export validation failed: ${issues.join(' ')}`); latestExport = await ai.saveExport({ workflow_id: workflow!.id, project_id: project.id, platform: 'n8n', workflow_version: workflow!.version, payload }); await updateProject(project.id, { phase: 'Export' }) } },
+        { stage: 'review', run: async () => { const value = await request(project, model, { agentId: 'reviewer', task: 'review', prompt: 'Review only the persisted internal workflow architecture. Report risks, failure modes, and concrete corrections.' }, lifecycleRequestId, lifecycleToken); await savePatch({ explanation: String(value.review ?? ''), status: 'reviewed' }); await updateProject(project.id, { phase: PROJECT_STAGE.review }) } },
+        { stage: 'export', run: async () => { ai.setArtifactJob(project.id, 'export', 'validating'); const payload = exportN8n(graph!); const issues = productionExportIssues(graph!, payload); if (issues.length) throw new Error(`Production export validation failed: ${issues.join(' ')}`); latestExport = await ai.saveExport({ workflow_id: workflow!.id, project_id: project.id, platform: 'n8n', workflow_version: workflow!.version, payload }); await updateProject(project.id, { phase: PROJECT_STAGE.export }) } },
       ]
       for (const job of jobs.filter(item => stages.includes(item.stage))) {
         try {

@@ -21,6 +21,7 @@ import { BillingPage } from '@/components/billing-page'
 import { useBilling } from '@/components/billing-provider'
 import { UpgradeModal } from '@/components/upgrade-modal'
 import { planLabels } from '@/lib/billing/types'
+import { normalizeProjectStage, PROJECT_STAGE, PROJECT_STAGES } from '@/lib/projects/lifecycle'
 
 const logo='/agentflow-logo.svg?v=badge-2'
 const chatLogo='/agentflow-logo.svg?v=badge-2'
@@ -131,10 +132,10 @@ function ProjectActions({project,onManage}:{project:Project;onManage:(project:Pr
 
 function Projects({projects,newProject,onOpen,onManage,loading,error}:{projects:Project[];newProject:()=>void;onOpen:(project:Project)=>void;onManage:(project:Project)=>void;loading:boolean;error:string|null}) {
   const [q,setQ]=useState('')
-  const stages=['Business Problem','Requirements','Workflow Planning','Workflow Design','Workflow Generation','Review','Export']
+  const stages=[...PROJECT_STAGES]
   const query=q.trim().toLowerCase()
   const visible=projects.filter(p=>`${p.name} ${p.description}`.toLowerCase().includes(query))
-  return <section className="page-view projects-page"><div className="page-heading"><div><span className="eyebrow">Automation library</span><h1>Automation projects</h1><p>Every project is a generated snapshot of its AI conversation.</p></div><button className="lime-button" onClick={newProject}><Plus size={18}/>New automation</button></div><div className="project-toolbar"><div className="search-field"><Search size={17}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search projects…"/></div></div><div className="project-list glass-list">{visible.map(p=>{const stage=stages.includes(p.phase)?p.phase:'Business Problem';const index=stages.indexOf(stage);const progress=Math.round((index+1)/stages.length*100);return <article className="project-row rich-project-row" key={p.id}><button className="project-row-main" onClick={()=>onOpen(p)}><div className="project-info"><strong>{p.name}</strong><span>{p.description||'No starting context.'}</span></div><div className="project-stage"><span><i className={`stage-dot stage-${index}`}/>{stage}</span><small>Updated {new Date(p.updatedAt).toLocaleDateString()}</small></div><div className="project-progress"><span>Progress <b>{progress}%</b></span><div className="progress-track"><i style={{width:`${progress}%`}}/></div></div></button><ProjectActions project={p} onManage={onManage}/></article>})}{loading&&<div className="results-empty shimmer-line"><img src={logo} alt=""/>Loading projects…</div>}{!loading&&error&&<div className="results-empty">Unable to load automation projects.</div>}{!loading&&!error&&!projects.length&&<div className="results-empty branded-empty"><img src={logo} alt=""/><span>No automation projects yet</span></div>}{!loading&&!error&&projects.length>0&&!visible.length&&<div className="results-empty">No projects match your search.</div>}</div></section>
+  return <section className="page-view projects-page"><div className="page-heading"><div><span className="eyebrow">Automation library</span><h1>Automation projects</h1><p>Every project is a generated snapshot of its AI conversation.</p></div><button className="lime-button" onClick={newProject}><Plus size={18}/>New automation</button></div><div className="project-toolbar"><div className="search-field"><Search size={17}/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search projects…"/></div></div><div className="project-list glass-list">{visible.map(p=>{const stage=normalizeProjectStage(p.phase);const index=stages.indexOf(stage);const progress=Math.round((index+1)/stages.length*100);return <article className="project-row rich-project-row" key={p.id}><button className="project-row-main" onClick={()=>onOpen(p)}><div className="project-info"><strong>{p.name}</strong><span>{p.description||'No starting context.'}</span></div><div className="project-stage"><span><i className={`stage-dot stage-${index}`}/>{stage}</span><small>Updated {new Date(p.updatedAt).toLocaleDateString()}</small></div><div className="project-progress"><span>Progress <b>{progress}%</b></span><div className="progress-track"><i style={{width:`${progress}%`}}/></div></div></button><ProjectActions project={p} onManage={onManage}/></article>})}{loading&&<div className="results-empty shimmer-line"><img src={logo} alt=""/>Loading projects…</div>}{!loading&&error&&<div className="results-empty">Unable to load automation projects.</div>}{!loading&&!error&&!projects.length&&<div className="results-empty branded-empty"><img src={logo} alt=""/><span>No automation projects yet</span></div>}{!loading&&!error&&projects.length>0&&!visible.length&&<div className="results-empty">No projects match your search.</div>}</div></section>
 }
 
 function ConversationTransition({leaving}:{leaving:boolean}) {
@@ -205,7 +206,7 @@ export default function Page(){
   const selectForConversation=(project:Project)=>{visitProject(project.id);setSelectedProjectId(project.id);setView('home');window.history.replaceState(null,'',`/?chat=${project.id}`)}
   const saveProject=async(name:string,description:string,files:File[],workflowFile?:File)=>{
     if(projectModal!=='new'){if(projectModal)await updateProject(projectModal.id,{name,description});return}
-    const created=await createProject({name,description,phase:workflowFile?'Workflow Generation':'Business Problem'})
+    const created=await createProject({name,description,phase:workflowFile?PROJECT_STAGE.workflowGeneration:PROJECT_STAGE.businessProblem})
     try{
       if(workflowFile){
         if(!user)throw new Error('Sign in to import a workflow.')
@@ -216,7 +217,7 @@ export default function Page(){
         if(!response.ok)throw new Error(typeof result.error==='string'?result.error:'Workflow import failed.')
         for(const file of files)await knowledge.uploadDocument(created.id,file)
         await ai.loadProjectIntelligence(created.id)
-        await updateProject(created.id,{description:String(result.analysis?.businessPurpose??description),phase:'Workflow Planning'})
+        await updateProject(created.id,{description:String(result.analysis?.businessPurpose??description),phase:PROJECT_STAGE.workflowPlanning})
         selectForConversation(created)
         return
       }

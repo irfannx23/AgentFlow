@@ -5,6 +5,8 @@ import { useAuth } from '@/components/account-state'
 import { supabase } from '@/lib/supabase/client'
 import type { Tables } from '@/lib/supabase/types'
 import { useBilling } from '@/components/billing-provider'
+import { PROJECT_STAGE } from '@/lib/projects/lifecycle'
+import { supabaseError } from '@/lib/supabase/errors'
 
 export type Project = {
   id: string
@@ -90,7 +92,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       .select('*')
       .eq('organization_id', workspaceId)
       .order('updated_at', { ascending: false })
-    if (projectsError) throw projectsError
+    if (projectsError) throw supabaseError(projectsError, 'Unable to load automation projects.')
     return (data ?? []).map(toProject)
   }, [])
 
@@ -114,7 +116,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           display_name: user.displayName?.trim() || account.name,
           avatar_url: user.photoURL,
         })
-        if (profileError) throw profileError
+        if (profileError) throw supabaseError(profileError, 'Unable to initialize your profile.')
 
         const workspaceResult = await supabase
           .from('organizations')
@@ -124,7 +126,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           .maybeSingle()
         let personalWorkspace = workspaceResult.data
         const workspaceError = workspaceResult.error
-        if (workspaceError) throw workspaceError
+        if (workspaceError) throw supabaseError(workspaceError, 'Unable to load your workspace.')
 
         if (!personalWorkspace) {
           const created = await supabase
@@ -139,10 +141,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
               .eq('owner_id', user.uid)
               .eq('is_personal', true)
               .single()
-            if (existing.error) throw existing.error
+            if (existing.error) throw supabaseError(existing.error, 'Unable to load your workspace.')
             personalWorkspace = existing.data
           } else if (created.error) {
-            throw created.error
+            throw supabaseError(created.error, 'Unable to create your workspace.')
           } else {
             personalWorkspace = created.data
           }
@@ -182,14 +184,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       organization_id: workspace.id,
       name: input.name,
       description: input.description || null,
-      stage: input.phase ?? 'Business Problem',
+      stage: input.phase ?? PROJECT_STAGE.businessProblem,
     }).select('*').single()
     if (createError) {
       if (createError.message.includes('FREE_PROJECT_LIMIT_REACHED')) {
         window.dispatchEvent(new CustomEvent('agentflow:upgrade-required', { detail: { reason: 'project-limit' } }))
         throw new ProjectLimitError()
       }
-      throw createError
+      throw supabaseError(createError, 'Unable to create the automation project.')
     }
     const project = toProject(data)
     setProjects(current => [project, ...current])
@@ -203,7 +205,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     if (input.description !== undefined) values.description = input.description || null
     if (input.phase !== undefined) values.stage = input.phase
     const { data, error: updateError } = await supabase.from('projects').update(values).eq('id', id).select('*').single()
-    if (updateError) throw updateError
+    if (updateError) throw supabaseError(updateError, 'Unable to update the automation project.')
     const project = toProject(data)
     setProjects(current => current.map(item => item.id === id ? project : item))
     return project
@@ -211,7 +213,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const deleteProject = useCallback(async (id: string) => {
     const { error: deleteError } = await supabase.from('projects').delete().eq('id', id)
-    if (deleteError) throw deleteError
+    if (deleteError) throw supabaseError(deleteError, 'Unable to delete the automation project.')
     setProjects(current => current.filter(project => project.id !== id))
     void refreshBilling()
     setRecentProjectIds(current => {

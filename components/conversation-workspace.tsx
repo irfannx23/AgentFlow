@@ -46,6 +46,12 @@ import {
   toolPlanReady,
   type ToolPlan,
 } from "@/lib/automation/tool-plan";
+import {
+  PROJECT_STAGE,
+  projectStageForRequirements,
+  shouldAdvanceProjectStage,
+  type ProjectStage,
+} from "@/lib/projects/lifecycle";
 
 const chatLogo = "/agentflow-logo.svg?v=badge-2";
 const geminiLogo =
@@ -1098,6 +1104,28 @@ ${transcript}`,
     return snapshot;
   };
 
+  const updateProjectLifecycle = async (
+    projectId: string,
+    values: { description?: string; phase?: ProjectStage },
+  ) => {
+    let lastError: unknown;
+    for (const delay of [0, 100, 250]) {
+      if (delay)
+        await new Promise((resolve) => window.setTimeout(resolve, delay));
+      try {
+        await onUpdate(projectId, values);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Unable to synchronize the automation project lifecycle.", {
+          cause: lastError,
+        });
+  };
+
   const saveRequirementSnapshot = async (
     target: Project,
     snapshot: RequirementSnapshot,
@@ -1152,9 +1180,11 @@ ${transcript}`,
       context: { requirementStatus: requirements.status },
     });
     try {
-      await onUpdate(target.id, {
+      await updateProjectLifecycle(target.id, {
         description: requirements.business_problem,
-        phase: snapshot.complete ? "Workflow Planning" : "Requirements",
+        phase: snapshot.complete
+          ? PROJECT_STAGE.workflowPlanning
+          : PROJECT_STAGE.requirements,
       });
     } catch (error) {
       await reportClientLifecycle(lifecycleToken, {
@@ -1223,7 +1253,7 @@ ${transcript}`,
           target = await createProject({
             name: projectName(prompt),
             description: prompt,
-            phase: "Business Problem",
+            phase: PROJECT_STAGE.businessProblem,
           });
         } catch (error) {
           await reportClientLifecycle(lifecycleToken, {
@@ -1256,6 +1286,15 @@ ${transcript}`,
         ai.projectId === target.id && ai.requirements?.status === "ready";
       const stackPlanning =
         ai.projectId === target.id && ai.requirements?.status === "planning";
+      const persistedStage = projectStageForRequirements(
+        ai.projectId === target.id ? ai.requirements?.status : null,
+      );
+      if (
+        persistedStage &&
+        shouldAdvanceProjectStage(target.phase, persistedStage)
+      ) {
+        await updateProjectLifecycle(target.id, { phase: persistedStage });
+      }
       const updatesAutomation = attachedDocuments || changesAutomation(prompt);
       if (!project) onProjectReady(target);
       for (const file of files) await knowledge.uploadDocument(target.id, file);
@@ -1632,7 +1671,9 @@ ${transcript}`,
         answers: answersWithToolPlan(ai.requirements.answers, finalized),
         status: "ready",
       });
-      await onUpdate(project.id, { phase: "Workflow Design" });
+      await updateProjectLifecycle(project.id, {
+        phase: PROJECT_STAGE.workflowDesign,
+      });
       await ai.addTimelineEvent({
         project_id: project.id,
         event_type: "tool_stack_finalized",
