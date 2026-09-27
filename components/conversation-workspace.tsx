@@ -25,6 +25,7 @@ import {
   ConversationDownloadsModal,
 } from "@/components/conversation-action-cards";
 import { ToolPlanCard } from "@/components/tool-plan-card";
+import { SupportedIntegrationsCta } from "@/components/supported-integrations";
 import type { Project } from "@/components/workspace-state";
 import { streamAIResponse, type AICitation } from "@/lib/ai/client";
 import type { Json } from "@/lib/supabase/types";
@@ -1829,6 +1830,7 @@ ${transcript}`,
             </h1>
             <p>{welcomeMessage}</p>
             {promptBox}
+            <SupportedIntegrationsCta />
             {status && <p className="home-chat-status">{status}</p>}
             {error && (
               <p className="ide-error" role="alert">
