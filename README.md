@@ -26,14 +26,9 @@ AgentFlow is a modern AI Automation Engineer that transforms natural-language bu
 - Firebase Authentication with Supabase persistence and Row Level Security
 - Usage analytics and PayU Test checkout integration
 
-## Screenshots
+# Product Architecture
 
-Screenshots will be added for the following release views:
-
-- AI workspace and requirements interview
-- Automation Blueprint and tool planning
-- Project lifecycle workspace
-- Validated workflow export and downloads
+![Product Architecture](architecture/agentflow-product-architecture.png)
 
 ## How AgentFlow Works
 
