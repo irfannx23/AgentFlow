@@ -28,7 +28,7 @@ AgentFlow is a modern AI Automation Engineer that transforms natural-language bu
 
 # Product Architecture
 
-![Product Architecture](architecture/agentflow-product-architecture.png)
+![Product Architecture](docs/agentflow-product-architecture.png)
 
 ## How AgentFlow Works
 
