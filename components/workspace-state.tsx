@@ -1,13 +1,16 @@
 'use client'
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { useAuth } from '@/components/account-state'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import type { User } from 'firebase/auth'
+import { accountFor, useAuth } from '@/components/account-state'
 import { supabase } from '@/lib/supabase/client'
 import type { Tables } from '@/lib/supabase/types'
 import { useBilling } from '@/components/billing-provider'
 import { PROJECT_STAGE } from '@/lib/projects/lifecycle'
+import { PROJECT_CREATION_MESSAGES, projectCreationMessage, projectCreationReadiness } from '@/lib/projects/creation-gate'
 import { supabaseError } from '@/lib/supabase/errors'
 import { reportAgentFlowEvent } from '@/lib/events/emitter'
+import { auth } from '@/lib/firebase'
 
 export type Project = {
   id: string
@@ -58,13 +61,20 @@ function workspaceName(displayName: string) {
 }
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const { user, account } = useAuth()
+  const { user } = useAuth()
   const { plan, entitlements, refresh: refreshBilling } = useBilling()
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const workspaceRef = useRef<Workspace | null>(null)
+  const bootstrapRef = useRef<{ userId: string; promise: Promise<void> } | null>(null)
+
+  const applyWorkspace = useCallback((next: Workspace | null) => {
+    workspaceRef.current = next
+    setWorkspace(next)
+  }, [])
 
   useEffect(() => {
     if (!user) {
@@ -97,9 +107,75 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     return (data ?? []).map(toProject)
   }, [])
 
+  /**
+   * Single workspace bootstrap path. The provider effect runs it on sign-in and
+   * project creation can await/retry it, so an authenticated user is never told
+   * to sign in simply because this is still running.
+   */
+  const bootstrapWorkspace = useCallback(async (firebaseUser: User, isActive: () => boolean) => {
+    const firebaseAccount = accountFor(firebaseUser)
+    setLoading(true)
+    setError(null)
+    try {
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: firebaseUser.uid,
+        email: firebaseUser.email,
+        display_name: firebaseUser.displayName?.trim() || firebaseAccount.name,
+        avatar_url: firebaseUser.photoURL,
+      })
+      if (profileError) throw supabaseError(profileError, 'Unable to initialize your profile.')
+
+      const workspaceResult = await supabase
+        .from('organizations')
+        .select('id,name')
+        .eq('owner_id', firebaseUser.uid)
+        .eq('is_personal', true)
+        .maybeSingle()
+      let personalWorkspace = workspaceResult.data
+      const workspaceError = workspaceResult.error
+      if (workspaceError) throw supabaseError(workspaceError, 'Unable to load your workspace.')
+
+      if (!personalWorkspace) {
+        const created = await supabase
+          .from('organizations')
+          .insert({ owner_id: firebaseUser.uid, name: workspaceName(firebaseAccount.name), is_personal: true })
+          .select('id,name')
+          .single()
+        if (created.error?.code === '23505') {
+          const existing = await supabase
+            .from('organizations')
+            .select('id,name')
+            .eq('owner_id', firebaseUser.uid)
+            .eq('is_personal', true)
+            .single()
+          if (existing.error) throw supabaseError(existing.error, 'Unable to load your workspace.')
+          personalWorkspace = existing.data
+        } else if (created.error) {
+          throw supabaseError(created.error, 'Unable to create your workspace.')
+        } else {
+          personalWorkspace = created.data
+        }
+      }
+
+      if (!isActive()) return
+      applyWorkspace(personalWorkspace)
+      const nextProjects = await loadProjectsFor(personalWorkspace.id)
+      if (isActive()) {
+        setProjects(nextProjects)
+        void refreshBilling()
+      }
+    } catch (initializationError) {
+      if (!isActive()) return
+      setError(initializationError instanceof Error ? initializationError.message : 'Unable to load your workspace.')
+    } finally {
+      if (isActive()) setLoading(false)
+    }
+  }, [applyWorkspace, loadProjectsFor, refreshBilling])
+
   useEffect(() => {
     if (!user) {
-      setWorkspace(null)
+      bootstrapRef.current = null
+      applyWorkspace(null)
       setProjects([])
       setError(null)
       setLoading(false)
@@ -107,82 +183,58 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
 
     let active = true
-    const initialize = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: user.uid,
-          email: user.email,
-          display_name: user.displayName?.trim() || account.name,
-          avatar_url: user.photoURL,
-        })
-        if (profileError) throw supabaseError(profileError, 'Unable to initialize your profile.')
-
-        const workspaceResult = await supabase
-          .from('organizations')
-          .select('id,name')
-          .eq('owner_id', user.uid)
-          .eq('is_personal', true)
-          .maybeSingle()
-        let personalWorkspace = workspaceResult.data
-        const workspaceError = workspaceResult.error
-        if (workspaceError) throw supabaseError(workspaceError, 'Unable to load your workspace.')
-
-        if (!personalWorkspace) {
-          const created = await supabase
-            .from('organizations')
-            .insert({ owner_id: user.uid, name: workspaceName(account.name), is_personal: true })
-            .select('id,name')
-            .single()
-          if (created.error?.code === '23505') {
-            const existing = await supabase
-              .from('organizations')
-              .select('id,name')
-              .eq('owner_id', user.uid)
-              .eq('is_personal', true)
-              .single()
-            if (existing.error) throw supabaseError(existing.error, 'Unable to load your workspace.')
-            personalWorkspace = existing.data
-          } else if (created.error) {
-            throw supabaseError(created.error, 'Unable to create your workspace.')
-          } else {
-            personalWorkspace = created.data
-          }
-        }
-
-        if (!active) return
-        setWorkspace(personalWorkspace)
-        const nextProjects = await loadProjectsFor(personalWorkspace.id)
-        if (active) {
-          setProjects(nextProjects)
-          void refreshBilling()
-        }
-      } catch (initializationError) {
-        if (!active) return
-        setError(initializationError instanceof Error ? initializationError.message : 'Unable to load your workspace.')
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
-    void initialize()
+    const pending = bootstrapWorkspace(user, () => active)
+    bootstrapRef.current = { userId: user.uid, promise: pending }
+    void pending.then(() => {
+      if (bootstrapRef.current?.promise === pending) bootstrapRef.current = null
+    })
     return () => { active = false }
-  }, [account.email, account.name, account.photoURL, loadProjectsFor, refreshBilling, user])
+  }, [applyWorkspace, bootstrapWorkspace, user])
 
   const reloadProjects = useCallback(async () => {
     if (!workspace) return
     setProjects(await loadProjectsFor(workspace.id))
   }, [loadProjectsFor, workspace])
 
+  const ensureWorkspace = useCallback(async (): Promise<Workspace | null> => {
+    if (workspaceRef.current) return workspaceRef.current
+    const firebaseUser = auth.currentUser
+    if (!firebaseUser) return null
+    const inFlight = bootstrapRef.current
+    const pending = inFlight?.userId === firebaseUser.uid ? inFlight.promise : bootstrapWorkspace(firebaseUser, () => true)
+    bootstrapRef.current = { userId: firebaseUser.uid, promise: pending }
+    await pending
+    return workspaceRef.current
+  }, [bootstrapWorkspace])
+
   const createProject = useCallback(async (input: ProjectInput) => {
-    if (!user || !workspace) throw new Error('Sign in to create an automation project.')
+    // Firebase may still be restoring the persisted session on the first paint, and
+    // the personal workspace is provisioned asynchronously after that. Neither state
+    // may be reported as "signed out".
+    await auth.authStateReady().catch(() => undefined)
+    const activeUser = auth.currentUser
+    const readiness = projectCreationReadiness({
+      authenticated: Boolean(activeUser),
+      authSettled: true,
+      workspaceReady: Boolean(workspaceRef.current ?? workspace),
+      workspaceError: error,
+    })
+    if (readiness.status === 'signed-out') throw new Error(PROJECT_CREATION_MESSAGES.signedOut)
+    if (readiness.status !== 'ready') {
+      const ensured = activeUser ? await ensureWorkspace() : null
+      if (!ensured) throw new Error(projectCreationMessage(readiness) ?? PROJECT_CREATION_MESSAGES.workspaceFailed)
+    }
+    const targetWorkspace = workspaceRef.current ?? workspace
+    if (!targetWorkspace) throw new Error(PROJECT_CREATION_MESSAGES.workspacePending)
+    const ownerId = activeUser?.uid ?? user?.uid
+    if (!ownerId) throw new Error(PROJECT_CREATION_MESSAGES.signedOut)
     if ((plan === 'free' && projects.length >= 3) || !entitlements.canCreateProject) {
       window.dispatchEvent(new CustomEvent('agentflow:upgrade-required', { detail: { reason: 'project-limit' } }))
       throw new ProjectLimitError()
     }
     const { data, error: createError } = await supabase.from('projects').insert({
-      owner_id: user.uid,
-      organization_id: workspace.id,
+      owner_id: ownerId,
+      organization_id: targetWorkspace.id,
       name: input.name,
       description: input.description || null,
       stage: input.phase ?? PROJECT_STAGE.businessProblem,
@@ -197,9 +249,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     const project = toProject(data)
     setProjects(current => [project, ...current])
     void refreshBilling()
-    reportAgentFlowEvent(user, { event: 'project.created', projectId: project.id, workspaceId: workspace.id, metadata: { phase: project.phase } })
+    reportAgentFlowEvent(activeUser ?? user, { event: 'project.created', projectId: project.id, workspaceId: targetWorkspace.id, metadata: { phase: project.phase } })
     return project
-  }, [entitlements.canCreateProject, plan, projects.length, refreshBilling, user, workspace])
+  }, [ensureWorkspace, entitlements.canCreateProject, error, plan, projects.length, refreshBilling, user, workspace])
 
   const updateProject = useCallback(async (id: string, input: Partial<ProjectInput>) => {
     const values: { name?: string; description?: string | null; stage?: string } = {}

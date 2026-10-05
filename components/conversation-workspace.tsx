@@ -28,6 +28,8 @@ import { ToolPlanCard } from "@/components/tool-plan-card";
 import { SupportedIntegrationsCta } from "@/components/supported-integrations";
 import type { Project } from "@/components/workspace-state";
 import { streamAIResponse, type AICitation } from "@/lib/ai/client";
+import { auth } from "@/lib/firebase";
+import { PROJECT_CREATION_MESSAGES } from "@/lib/projects/creation-gate";
 import type { Json } from "@/lib/supabase/types";
 import type {
   ConnectionModel,
@@ -1010,7 +1012,10 @@ export function ConversationWorkspace({
     lifecycleRequestId?: string,
     lifecycleToken?: string,
   ) => {
-    if (!user) throw new Error("Sign in to continue.");
+    // Mirror the composer: a restored Firebase session is a valid identity even when
+    // React's auth state has not re-rendered yet.
+    const activeUser = user ?? auth.currentUser;
+    if (!activeUser) throw new Error("Sign in to continue.");
     if (!selectedModel)
       throw new Error(
         "Connect an AI provider in Settings → Connections first.",
@@ -1018,7 +1023,7 @@ export function ConversationWorkspace({
     const response = await fetch("/api/intelligence/generate", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${lifecycleToken ?? (await user.getIdToken())}`,
+        authorization: `Bearer ${lifecycleToken ?? (await activeUser.getIdToken())}`,
         "content-type": "application/json",
         ...(lifecycleRequestId ? { "x-request-id": lifecycleRequestId } : {}),
       },
@@ -1205,7 +1210,15 @@ ${transcript}`,
   };
 
   const send = async () => {
-    if (!message.trim() || !user || busy) return;
+    if (!message.trim() || busy) return;
+    // Firebase can still be restoring the persisted session during the first paint.
+    // Waiting for auth readiness keeps a signed-in user from being reported as signed out.
+    await auth.authStateReady().catch(() => undefined);
+    const activeUser = user ?? auth.currentUser;
+    if (!activeUser) {
+      setError(PROJECT_CREATION_MESSAGES.signedOut);
+      return;
+    }
     if (!selectedModel) {
       setError("Connect an AI provider in Settings → Connections first.");
       return;
@@ -1236,7 +1249,7 @@ ${transcript}`,
     let lifecycleToken = "";
     let lifecycleProjectId = project?.id;
     try {
-      lifecycleToken = await user.getIdToken();
+      lifecycleToken = await activeUser.getIdToken();
       void reportClientLifecycle(lifecycleToken, {
         requestId: lifecycleRequestId,
         stage: "authentication",
