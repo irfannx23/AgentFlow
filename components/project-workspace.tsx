@@ -46,6 +46,7 @@ import {
 } from "@/lib/automation/downloads";
 import { useDialogFocus } from "@/components/use-dialog-focus";
 import type { Json } from "@/lib/supabase/types";
+import { productionPackageReady } from "@/lib/automation/package-readiness";
 
 type ReportItem = {
   id: ArtifactStage;
@@ -700,14 +701,12 @@ export function ProjectWorkspace({
     ? [readmeFile, productionExportFile!]
     : [];
   const validatedFiles = [readmeFile, ...packageFiles];
-  const allReady =
-    requirementsReady &&
-    workflowReady &&
-    deploymentReady &&
-    environmentReady &&
-    testingReady &&
-    reviewReady &&
-    Boolean(latestExport);
+  const allReady = productionPackageReady({
+    requirementsReady, workflowReady, deploymentReady, environmentReady,
+    testingReady, architectureReviewReady: reviewReady,
+    exportReady: Boolean(latestExport),
+    zipValid: Boolean(latestExport && validatedFiles.length >= 8),
+  });
   const exportProject = async () => {
     void ai.addTimelineEvent({
       project_id: project.id,

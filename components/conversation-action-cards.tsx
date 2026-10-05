@@ -91,20 +91,24 @@ export function AutomationCompletionCard({
   project,
   ready,
   jobs,
+  stageReady,
   workflowVersion,
   startedAt,
   completedAt,
   openDownloads,
   downloadPackage,
+  retryArchitectureReview,
 }: {
   project: Project;
   ready: boolean;
   jobs: Partial<Record<ArtifactStage, ArtifactJob>>;
+  stageReady: Partial<Record<ArtifactStage, boolean>>;
   workflowVersion?: number;
   startedAt: string;
   completedAt?: string;
   openDownloads: () => void;
   downloadPackage: () => void;
+  retryArchitectureReview: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -139,8 +143,12 @@ export function AutomationCompletionCard({
     { name: ".env.example", stage: "environment", icon: FileCode2 },
     { name: "Project ZIP", stage: "export", icon: Archive },
   ];
-  const statusFor = (stage: ArtifactStage) =>
-    ready ? "complete" : (jobs[stage]?.status ?? (stage === "requirements" ? "complete" : "queued"));
+  const statusFor = (stage: ArtifactStage) => {
+    if (ready) return "complete";
+    const job = jobs[stage];
+    if (job && job.status !== "complete") return job.status;
+    return stageReady[stage] ? "complete" : (job?.status ?? "queued");
+  };
   const completed = artifacts.filter((artifact) => statusFor(artifact.stage) === "complete").length;
   const percentage = ready ? 100 : Math.round((completed / artifacts.length) * 100);
   const failed = artifacts.some((artifact) => statusFor(artifact.stage) === "error");
@@ -163,6 +171,12 @@ export function AutomationCompletionCard({
     ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`
     : `${elapsedSeconds}s`;
   const validation = failed ? "Needs attention" : ready ? "Passed" : validating ? "Validating" : "Pending";
+  const reviewCanRetry = !stageReady.review && Boolean(stageReady.workflow && stageReady.deployment && stageReady.environment && stageReady.testing);
+  const reviewFailure = jobs.review?.status === "error"
+    ? jobs.review.error
+    : reviewCanRetry && jobs.review?.status !== "generating"
+      ? "Architecture Review is incomplete. Retry only this stage."
+      : null;
 
   return (
     <div className="generation-experience">
@@ -217,7 +231,15 @@ export function AutomationCompletionCard({
           })}
         </div>
 
+        {reviewFailure && (
+          <div className="package-response-mark" role="alert">
+            <AlertCircle size={15} />
+            <span>{reviewFailure}</span>
+          </div>
+        )}
+
         <div className="production-package-actions">
+          {reviewFailure && <button className="primary" onClick={retryArchitectureReview}><ShieldCheck size={15} />Retry Architecture Review</button>}
           <button className="primary" disabled={!ready} onClick={openDownloads}><Download size={15} />Open Downloads</button>
           <button disabled={!ready} onClick={downloadPackage}><FileArchive size={15} />Download Package</button>
           <button onClick={openProject}><FolderOpen size={15} />Open Project</button>

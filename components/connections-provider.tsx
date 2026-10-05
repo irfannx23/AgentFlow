@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAuth } from '@/components/account-state'
 import { useWorkspace } from '@/components/workspace-state'
 import type { ConnectionModel, ConnectionProvider, ConnectionSummary } from '@/lib/connections/types'
+import type { ProviderConnectionResult } from '@/lib/ai/provider-errors'
 import { reportAgentFlowEvent } from '@/lib/events/emitter'
 
 type ConnectionsState = {
@@ -71,8 +72,8 @@ export function ConnectionsProvider({ children }: { children: React.ReactNode })
       headers: { authorization: `Bearer ${token}`, ...(method === 'GET' || method === 'DELETE' ? {} : { 'content-type': 'application/json' }) },
       body: method === 'GET' || method === 'DELETE' ? undefined : JSON.stringify({ provider, apiKey, testOnly }),
     })
-    const payload = response.status === 204 ? null : await response.json() as { connections?: ConnectionSummary[]; models?: ConnectionModel[]; connection?: ConnectionSummary; valid?: boolean; error?: unknown }
-    if (!response.ok && response.status !== 422) throw new Error(errorMessage(payload?.error) ?? 'Connection request failed.')
+    const payload = response.status === 204 ? null : await response.json() as { connections?: ConnectionSummary[]; models?: ConnectionModel[]; connection?: ConnectionSummary; valid?: boolean; error?: unknown } & Partial<ProviderConnectionResult>
+    if (!response.ok) throw new Error(payload?.userMessage ?? errorMessage(payload?.error) ?? 'Connection request failed.')
     return payload
   }, [user, workspace?.id])
 

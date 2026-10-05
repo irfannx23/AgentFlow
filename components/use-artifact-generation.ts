@@ -80,7 +80,8 @@ export function useArtifactGeneration() {
     if (!response.ok) {
       if (payload.error && typeof payload.error === 'object') {
         const issues = Array.isArray(payload.error.issues) ? ` ${payload.error.issues.join(' ')}` : ''
-        throw new Error(`${String(payload.error.message ?? 'Artifact generation failed.')}${issues}`)
+        const category = typeof payload.error.category === 'string' ? ` [${payload.error.category}]` : ''
+        throw new Error(`${String(payload.error.message ?? 'Artifact generation failed.')}${category}${issues}`)
       }
       throw new Error(typeof payload.error === 'string' ? payload.error : 'Artifact generation failed.')
     }

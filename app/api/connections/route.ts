@@ -3,6 +3,7 @@ import { getAIProvider, listAIModels } from '@/lib/ai/provider-registry'
 import { authenticatedUserId, deleteConnection, listConnections, loadCredential, saveConnection } from '@/lib/connections/repository'
 import { isConnectionProvider } from '@/lib/connections/types'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { connectionFailure, type ProviderConnectionResult } from '@/lib/ai/provider-errors'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -18,6 +19,10 @@ function workspaceFor(request: Request) {
 
 function failure(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
+}
+
+function resultResponse(result: ProviderConnectionResult, connection?: Awaited<ReturnType<typeof saveConnection>>) {
+  return NextResponse.json({ ...result, valid: result.success, ...(connection ? { connection } : {}) }, { status: result.success ? 200 : 422 })
 }
 
 function logException(error: unknown) {
@@ -52,16 +57,17 @@ export async function POST(request: Request) {
     const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
     if (!apiKey || apiKey.length > 10_000) return failure('A valid API key is required.', 400)
     const provider = getAIProvider(body.provider)
-    const valid = await provider.testConnection(apiKey)
-    if (body.testOnly === true) return NextResponse.json({ valid }, { status: valid ? 200 : 422 })
-    const testedAt = valid ? new Date().toISOString() : null
-    const connection = await saveConnection(client, ownerId, body.provider, apiKey, workspaceFor(request), valid ? 'connected' : 'invalid', testedAt)
-    return NextResponse.json({ connection, valid }, { status: valid ? 200 : 422 })
+    const result = await provider.testConnection(apiKey)
+    if (body.testOnly === true) return resultResponse(result)
+    const testedAt = result.success ? new Date().toISOString() : null
+    const connection = await saveConnection(client, ownerId, body.provider, apiKey, workspaceFor(request), result.success ? 'connected' : 'invalid', testedAt)
+    return resultResponse(result, connection)
   } catch (error) {
     if (error instanceof SyntaxError) return failure('A valid JSON request body is required.', 400)
     if (error instanceof Error && error.message === 'UNAUTHENTICATED') return failure('Authentication is required.', 401)
+    const result = connectionFailure('unknown', error)
     logException(error)
-    return failure('Unable to save this connection.', 502)
+    return NextResponse.json(result, { status: 502 })
   }
 }
 
@@ -72,13 +78,14 @@ export async function PATCH(request: Request) {
     if (!isConnectionProvider(body.provider)) return failure('This provider is not supported.', 400)
     const workspaceId = workspaceFor(request)
     const credential = await loadCredential(client, ownerId, body.provider, workspaceId, false)
-    const valid = await getAIProvider(body.provider).testConnection(credential)
-    const connection = await saveConnection(client, ownerId, body.provider, credential, workspaceId, valid ? 'connected' : 'invalid', valid ? new Date().toISOString() : null)
-    return NextResponse.json({ connection, valid }, { status: valid ? 200 : 422 })
+    const result = await getAIProvider(body.provider).testConnection(credential)
+    const connection = await saveConnection(client, ownerId, body.provider, credential, workspaceId, result.success ? 'connected' : 'invalid', result.success ? new Date().toISOString() : null)
+    return resultResponse(result, connection)
   } catch (error) {
     if (error instanceof Error && error.message === 'UNAUTHENTICATED') return failure('Authentication is required.', 401)
+    const result = connectionFailure('unknown', error)
     logException(error)
-    return failure('Unable to test this connection.', 502)
+    return NextResponse.json(result, { status: 502 })
   }
 }
 

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { AGENTFLOW_EVENT_NAMES } from '@/lib/events/contract'
+import { loginEvent, registrationEvent } from '@/lib/events/auth-emissions'
 import { emitAgentFlowEvent } from '@/lib/events/emitter'
 
 test('event contract exposes every integration event exactly once', () => {
@@ -40,6 +41,19 @@ test('client emitter sends a Firebase-authenticated canonical event envelope', a
   }
 })
 
+test('Firebase auth emissions include real signup identity data without adding it to login events', () => {
+  const registered = registrationEvent({ email: 'new.user@example.test', displayName: ' New User ' }, 'password')
+  assert.deepEqual(registered.metadata, {
+    method: 'email',
+    provider: 'password',
+    email: 'new.user@example.test',
+    displayName: 'New User',
+  })
+  const loggedIn = loginEvent('google.com')
+  assert.equal(loggedIn.event, 'user.logged_in')
+  assert.equal('email' in loggedIn.metadata, false)
+})
+
 test('existing action boundaries emit backend events without UI replacement', async () => {
   const files = await Promise.all([
     'components/account-state.tsx',
@@ -50,6 +64,7 @@ test('existing action boundaries emit backend events without UI replacement', as
     'components/use-artifact-generation.ts',
     'components/product-home.tsx',
     'components/tool-plan-card.tsx',
+    'lib/events/auth-emissions.ts',
   ].map(path => readFile(new URL(`../${path}`, import.meta.url), 'utf8')))
   const source = files.join('\n')
   for (const name of [

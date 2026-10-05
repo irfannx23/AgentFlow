@@ -556,3 +556,15 @@
 @media(max-width:760px){.design-v2 .download-success{grid-template-columns:32px minmax(0,1fr) 26px;padding:13px}.design-v2 .download-success>span{width:30px;height:30px}}
 .design-v2 .global-download-success{position:fixed;z-index:300;right:22px;bottom:22px;width:min(520px,calc(100vw - 32px));backdrop-filter:blur(24px)}
 @media(max-width:760px){.design-v2 .global-download-success{right:16px;bottom:16px}}
+
+/* Responsive hardening — small-screen usability (additive; desktop unaffected) */
+@media(max-width:760px){
+.design-v2,.design-v2 .home-view,.design-v2 .page-view,.design-v2 .home-chat-workspace{overflow-x:clip}
+.design-v2 .message-content,.design-v2 .message-content p,.design-v2 .message-content li,.design-v2 .message-content a,.design-v2 .snapshot-node-list span,.design-v2 .chat-download-node-list span,.design-v2 .project-list-area button,.design-v2 .artifact-modal-title{overflow-wrap:anywhere}
+.design-v2 .nav-item,.design-v2 .recent-project,.design-v2 .new-project,.design-v2 .profile{min-height:44px}
+}
+@media(max-width:480px){
+.design-v2 .page-view{padding:22px 16px 42px}
+.modal-backdrop,.report-modal-backdrop,.utility-modal-backdrop{padding:12px}
+.design-v2 .glass-modal,.design-v2 .project-modal,.design-v2 .connect-modal,.design-v2 .report-modal,.design-v2 .artifact-modal,.design-v2 .upgrade-modal,.design-v2 .manage-connection-modal{max-width:calc(100vw - 24px)}
+}
