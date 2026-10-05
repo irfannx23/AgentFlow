@@ -42,7 +42,11 @@ function initialsFor(name: string) {
   return initials.toUpperCase() || 'A'
 }
 
-function accountFor(user: User | null): AccountIdentity {
+/**
+ * Exported so every consumer maps Firebase users to identity with one source of
+ * truth (workspace provisioning reads the same name as the account UI).
+ */
+export function accountFor(user: User | null): AccountIdentity {
   if (!user) return guestAccount
   const name = user.displayName?.trim() || readableEmailName(user.email)
   return {
