@@ -35,6 +35,7 @@ import type {
 } from "@/lib/connections/types";
 import { isWorkflowGraph } from "@/lib/automation/types";
 import { n8nValidationIssues } from "@/lib/automation/exporters/n8n";
+import { productionPackageReady } from "@/lib/automation/package-readiness";
 import {
   newLifecycleRequestId,
   reportClientLifecycle,
@@ -1603,16 +1604,26 @@ ${transcript}`,
           n8nValidationIssues(item.payload).length === 0,
       )
     : undefined;
-  const packageReady = Boolean(
-    ai.requirements?.status === "ready" &&
-      currentGraph &&
-      currentWorkflow?.deployment_guide?.trim() &&
-      Array.isArray(currentWorkflow.testing_checklist) &&
-      currentWorkflow.testing_checklist.length > 0 &&
-      currentWorkflow.explanation?.trim() &&
-      validatedExport,
-  );
   const currentJobs = project ? (ai.artifactJobs[project.id] ?? {}) : {};
+  const persistedStageReady: Partial<Record<ArtifactStage, boolean>> = {
+    requirements: ai.requirements?.status === "ready",
+    workflow: Boolean(currentGraph),
+    deployment: Boolean(currentWorkflow?.deployment_guide?.trim()),
+    environment: Array.isArray(currentWorkflow?.environment_variables),
+    testing: Array.isArray(currentWorkflow?.testing_checklist) && currentWorkflow.testing_checklist.length > 0,
+    review: Boolean(currentWorkflow?.explanation?.trim()),
+    export: Boolean(validatedExport),
+  };
+  const packageReady = productionPackageReady({
+    requirementsReady: Boolean(persistedStageReady.requirements),
+    workflowReady: Boolean(persistedStageReady.workflow),
+    deploymentReady: Boolean(persistedStageReady.deployment),
+    environmentReady: Boolean(persistedStageReady.environment),
+    testingReady: Boolean(persistedStageReady.testing),
+    architectureReviewReady: Boolean(persistedStageReady.review) && currentJobs.review?.status !== "error",
+    exportReady: Boolean(persistedStageReady.export),
+    zipValid: Boolean(currentGraph && validatedExport),
+  });
   const currentToolPlan =
     project && ai.projectId === project.id
       ? toolPlanFromAnswers(ai.requirements?.answers ?? null)
@@ -1946,11 +1957,13 @@ ${transcript}`,
                       project={project}
                       ready={packageReady}
                       jobs={currentJobs}
+                      stageReady={persistedStageReady}
                       workflowVersion={currentWorkflow?.version}
                       startedAt={item.created_at}
                       completedAt={currentWorkflow?.updated_at}
                       openDownloads={() => setDownloadsMode("open")}
                       downloadPackage={() => setDownloadsMode("download")}
+                      retryArchitectureReview={() => generateAdvanced("review")}
                     />
                   )}{" "}
                   {citations.length > 0 && (

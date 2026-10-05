@@ -21,6 +21,16 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * The workspace claim is only trusted when the authenticated caller can read the
+ * organization through their own RLS scope, so a client cannot attribute an event
+ * (and therefore an engine account) to a workspace it does not belong to.
+ */
+async function callerBelongsToWorkspace(client: ReturnType<typeof createServerSupabaseClient>, workspaceId: string) {
+  const organization = await client.from('organizations').select('id').eq('id', workspaceId).maybeSingle()
+  return !organization.error && organization.data?.id === workspaceId
+}
+
 export async function POST(request: Request) {
   const token = bearerToken(request)
   if (!token) return NextResponse.json({ error: 'Authentication is required.' }, { status: 401 })
@@ -29,7 +39,8 @@ export async function POST(request: Request) {
   if (!backendUrl || !integrationSecret) return NextResponse.json({ error: 'Backend event integration is not configured.' }, { status: 503 })
 
   try {
-    const ownerId = await authenticatedUserId(createServerSupabaseClient(token))
+    const client = createServerSupabaseClient(token)
+    const ownerId = await authenticatedUserId(client)
     const body = await request.json() as Record<string, unknown>
     const eventId = typeof body.eventId === 'string' ? body.eventId.trim() : ''
     const timestamp = typeof body.timestamp === 'string' ? body.timestamp : ''
@@ -37,6 +48,9 @@ export async function POST(request: Request) {
     const workspaceId = optionalId(body.workspaceId)
     if (!eventId || !isAgentFlowEventName(body.event) || !Number.isFinite(Date.parse(timestamp)) || projectId === undefined || workspaceId === undefined || !record(body.metadata)) {
       return NextResponse.json({ error: 'Invalid event payload.' }, { status: 422 })
+    }
+    if (workspaceId && !(await callerBelongsToWorkspace(client, workspaceId))) {
+      return NextResponse.json({ error: 'Event workspace could not be verified.' }, { status: 422 })
     }
     const event: AgentFlowEvent = {
       eventId,

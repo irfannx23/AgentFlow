@@ -1,15 +1,28 @@
 import { FirebaseError } from 'firebase/app'
+import type { User } from 'firebase/auth'
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
+  getAdditionalUserInfo,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
   updateProfile,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
+import { supabase } from '@/lib/supabase/client'
 
 const googleProvider = new GoogleAuthProvider()
+
+async function initializeProfile(user: User) {
+  const result = await supabase.from('profiles').upsert({
+    id: user.uid,
+    email: user.email,
+    display_name: user.displayName?.trim() || null,
+    avatar_url: user.photoURL,
+  })
+  if (result.error) throw result.error
+}
 
 export async function loginWithEmail(email: string, password: string) {
   return signInWithEmailAndPassword(auth, email, password)
@@ -18,11 +31,14 @@ export async function loginWithEmail(email: string, password: string) {
 export async function signupWithEmail(name: string, email: string, password: string) {
   const credential = await createUserWithEmailAndPassword(auth, email, password)
   await updateProfile(credential.user, { displayName: name.trim() })
+  await initializeProfile(credential.user)
   return credential
 }
 
 export async function loginWithGoogle() {
-  return signInWithPopup(auth, googleProvider)
+  const credential = await signInWithPopup(auth, googleProvider)
+  if (getAdditionalUserInfo(credential)?.isNewUser) await initializeProfile(credential.user)
+  return credential
 }
 
 export async function signOut() {

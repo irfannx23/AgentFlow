@@ -1,9 +1,11 @@
 import 'server-only'
 
 import type { AIProviderAdapter } from '@/lib/ai/provider'
+import { connectionFailure, normalizeProviderError, providerHttpError, ProviderError, type ProviderConnectionResult } from '@/lib/ai/provider-errors'
+import { testProviderConnection } from '@/lib/ai/provider-connection'
 import type { AIGenerationRequest, AIGenerationResult, AIStreamEvent, AIUsage } from '@/lib/ai/types'
 
-const API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models'
+const DEFAULT_API_ROOT = 'https://generativelanguage.googleapis.com/v1beta/models'
 const DEFAULT_MODEL = 'gemini-3.6-flash'
 const REQUEST_TIMEOUT_MS = 60_000
 const EMBEDDING_MODEL = 'gemini-embedding-001'
@@ -24,6 +26,20 @@ type GeminiResponse = {
 
 function configuredModel() {
   return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL
+}
+
+export function configuredGeminiApiRoot() {
+  const configured = process.env.GEMINI_ENDPOINT?.trim() || DEFAULT_API_ROOT
+  let url: URL
+  try { url = new URL(configured) } catch (error) {
+    throw new ProviderError('gemini', 'endpoint', 'GEMINI_ENDPOINT_INVALID', 'The Gemini endpoint is not a valid HTTPS URL.', undefined, { cause: error })
+  }
+  if (url.protocol !== 'https:') throw new ProviderError('gemini', 'endpoint', 'GEMINI_ENDPOINT_INVALID', 'The Gemini endpoint must use HTTPS.')
+  const path = url.pathname.replace(/\/+$/, '')
+  url.pathname = path.endsWith('/models') ? path : `${path}/models`
+  url.search = ''
+  url.hash = ''
+  return url.toString().replace(/\/$/, '')
 }
 
 function usage(metadata?: GeminiUsage): AIUsage | undefined {
@@ -59,41 +75,16 @@ async function responseErrorBody(response: Response) {
   return response.ok ? null : response.clone().text()
 }
 
-function isInvalidApiKeyResponse(status: number, body: string | null) {
-  if (status === 401 || status === 403) return true
-  if (status !== 400 || !body) return false
-  try {
-    const payload = JSON.parse(body) as { error?: { message?: unknown; details?: Array<{ reason?: unknown }> } }
-    return payload.error?.details?.some(detail => detail.reason === 'API_KEY_INVALID') === true
-      || (typeof payload.error?.message === 'string' && /api key not valid/i.test(payload.error.message))
-  } catch {
-    return false
-  }
-}
-
-function geminiErrorMessage(status: number, body: string | null) {
-  void body
-  if (status === 401 || status === 403) return 'Invalid API Key'
-  if (status === 404) return 'Model unavailable'
-  if (status === 429) return 'Rate limit exceeded'
-  if (status === 408) return 'Gemini request timed out. Please try again.'
-  if (status === 503) return 'Model temporarily unavailable. Please try again.'
-  if (status >= 500) return 'Google AI service is temporarily unavailable.'
-  return `Gemini request failed with status ${status}.`
-}
-
 async function geminiFetch(request: AIGenerationRequest, streaming: boolean, credential: string) {
-  if (request.model !== configuredModel()) throw new Error('The requested AI model is not enabled.')
+  if (request.model !== configuredModel()) throw new ProviderError('gemini', 'model', 'PROVIDER_MODEL_NOT_CONFIGURED', 'The requested AI model is not enabled.')
   const operation = streaming ? 'streamGenerateContent?alt=sse' : 'generateContent'
-  const endpoint = `${API_ROOT}/${encodeURIComponent(request.model)}:${operation}`
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': credential },
-    body: JSON.stringify(requestBody(request)),
-    signal: requestSignal(request.signal),
-  })
+  const endpoint = `${configuredGeminiApiRoot()}/${encodeURIComponent(request.model)}:${operation}`
+  let response: Response
+  try {
+    response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': credential }, body: JSON.stringify(requestBody(request)), signal: requestSignal(request.signal) })
+  } catch (error) { throw normalizeProviderError('gemini', error) }
   const errorBody = await responseErrorBody(response)
-  if (!response.ok) throw new Error(geminiErrorMessage(response.status, errorBody))
+  if (!response.ok) throw providerHttpError('gemini', response.status, errorBody ?? '')
   return response
 }
 
@@ -168,24 +159,20 @@ export class GeminiProvider implements AIProviderAdapter {
     }
   }
 
-  async testConnection(credential: string) {
-    const model = configuredModel()
-    const endpoint = `${API_ROOT}/${encodeURIComponent(model)}:generateContent`
-    const response = await fetch(endpoint, {
-      method: 'POST',
+  async testConnection(credential: string): Promise<ProviderConnectionResult> {
+    let endpoint: string
+    try { endpoint = `${configuredGeminiApiRoot()}/${encodeURIComponent(configuredModel())}:generateContent` }
+    catch (error) { return connectionFailure('gemini', error) }
+    return testProviderConnection({
+      provider: 'gemini', endpoint, method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': credential },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply OK.' }] }], generationConfig: { maxOutputTokens: 1 } }),
-      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply OK.' }] }], generationConfig: { maxOutputTokens: 8 } }),
     })
-    const errorBody = await responseErrorBody(response)
-    if (response.ok) return true
-    if (isInvalidApiKeyResponse(response.status, errorBody)) return false
-    throw new Error(geminiErrorMessage(response.status, errorBody))
   }
 
   async embed(texts: string[], credential: string) {
     if (!texts.length) return []
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${EMBEDDING_MODEL}:batchEmbedContents`
+    const endpoint = `${configuredGeminiApiRoot()}/${EMBEDDING_MODEL}:batchEmbedContents`
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': credential },
@@ -193,7 +180,7 @@ export class GeminiProvider implements AIProviderAdapter {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
     const errorBody = await responseErrorBody(response)
-    if (!response.ok) throw new Error(geminiErrorMessage(response.status, errorBody))
+    if (!response.ok) throw providerHttpError('gemini', response.status, errorBody ?? '')
     const payload = await response.json() as { embeddings?: Array<{ values?: number[] }> }
     const embeddings = payload.embeddings?.map(item => item.values ?? []) ?? []
     if (embeddings.length !== texts.length || embeddings.some(item => item.length !== 768)) throw new Error('Gemini returned invalid embeddings.')
@@ -202,7 +189,7 @@ export class GeminiProvider implements AIProviderAdapter {
 
   async extractText(data: string, mimeType: string, credential: string) {
     const model = configuredModel()
-    const endpoint = `${API_ROOT}/${encodeURIComponent(model)}:generateContent`
+    const endpoint = `${configuredGeminiApiRoot()}/${encodeURIComponent(model)}:generateContent`
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': credential },
@@ -210,7 +197,7 @@ export class GeminiProvider implements AIProviderAdapter {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
     const errorBody = await responseErrorBody(response)
-    if (!response.ok) throw new Error(geminiErrorMessage(response.status, errorBody))
+    if (!response.ok) throw providerHttpError('gemini', response.status, errorBody ?? '')
     return responseText(await response.json() as GeminiResponse)
   }
 }

@@ -1,6 +1,8 @@
 import 'server-only'
 
 import type { AIProviderAdapter } from '@/lib/ai/provider'
+import { normalizeProviderError, providerHttpError, ProviderError, type ProviderConnectionResult } from '@/lib/ai/provider-errors'
+import { testProviderConnection } from '@/lib/ai/provider-connection'
 import type { AIGenerationRequest, AIGenerationResult, AIModelConfiguration, AIStreamEvent, AIUsage } from '@/lib/ai/types'
 
 type ChatResponse = {
@@ -21,16 +23,6 @@ type CompatibleOptions = {
 function usage(value?: ChatResponse['usage']): AIUsage | undefined {
   if (!value) return undefined
   return { inputTokens: value.prompt_tokens, outputTokens: value.completion_tokens, totalTokens: value.total_tokens }
-}
-
-function errorMessage(provider: string, status: number, body: string) {
-  void body
-  if (status === 401 || status === 403) return 'Invalid API Key'
-  if (status === 404) return 'Model unavailable'
-  if (status === 429) return 'Rate limit exceeded'
-  if (status === 408) return `${provider} request timed out. Please try again.`
-  if (status >= 500) return `${provider} is temporarily unavailable. Please try again.`
-  return `${provider} request failed with status ${status}.`
 }
 
 function signal(value?: AbortSignal, timeout = 60_000) {
@@ -63,7 +55,7 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 
   private ensureModel(model: string) {
-    if (!this.models.some(candidate => candidate.id === model)) throw new Error('The requested AI model is not enabled.')
+    if (!this.models.some(candidate => candidate.id === model)) throw new ProviderError(this.id, 'model', 'PROVIDER_MODEL_NOT_CONFIGURED', 'The requested AI model is not enabled.')
   }
 
   private body(request: AIGenerationRequest, stream: boolean) {
@@ -79,14 +71,13 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
   }
 
   private async request(path: string, credential: string, init: RequestInit = {}) {
-    const response = await fetch(`${this.options.apiRoot}${path}`, {
-      ...init,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${credential}`, ...init.headers },
-      signal: init.signal ?? AbortSignal.timeout(60_000),
-    })
+    let response: Response
+    try {
+      response = await fetch(`${this.options.apiRoot}${path}`, { ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${credential}`, ...init.headers }, signal: init.signal ?? AbortSignal.timeout(60_000) })
+    } catch (error) { throw normalizeProviderError(this.id, error) }
     if (!response.ok) {
       const body = await response.text()
-      throw new Error(errorMessage(this.id, response.status, body))
+      throw providerHttpError(this.id, response.status, body)
     }
     return response
   }
@@ -128,14 +119,8 @@ export class OpenAICompatibleProvider implements AIProviderAdapter {
     }
   }
 
-  async testConnection(credential: string) {
-    try {
-      await this.request('/models', credential, { method: 'GET', signal: AbortSignal.timeout(15_000) })
-      return true
-    } catch (error) {
-      if (error instanceof Error && error.message === 'Invalid API Key') return false
-      throw error
-    }
+  async testConnection(credential: string): Promise<ProviderConnectionResult> {
+    return testProviderConnection({ provider: this.id, endpoint: `${this.options.apiRoot}/models`, headers: { authorization: `Bearer ${credential}` } })
   }
 
   async embed(texts: string[], credential: string) {

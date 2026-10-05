@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { User } from 'firebase/auth'
-import { onAuthStateChanged } from 'firebase/auth'
+import { getAdditionalUserInfo, onAuthStateChanged } from 'firebase/auth'
 import { auth } from '@/lib/firebase'
 import {
   loginWithEmail as firebaseLoginWithEmail,
@@ -11,6 +11,7 @@ import {
   signupWithEmail as firebaseSignupWithEmail,
 } from '@/lib/auth'
 import { reportAgentFlowEvent } from '@/lib/events/emitter'
+import { loginEvent, registrationEvent } from '@/lib/events/auth-emissions'
 
 export type AccountIdentity = {
   status: 'signed-in' | 'guest'
@@ -88,18 +89,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithEmail = useCallback((email: string, password: string) =>
     run(async () => {
       const credential = await firebaseLoginWithEmail(email, password)
-      reportAgentFlowEvent(credential.user, { event: 'user.logged_in', projectId: null, workspaceId: null, metadata: { method: 'email' } })
+      reportAgentFlowEvent(credential.user, loginEvent('password'))
     }), [run])
   const signupWithEmail = useCallback((name: string, email: string, password: string) =>
     run(async () => {
       const credential = await firebaseSignupWithEmail(name, email, password)
       setUser(credential.user)
       setProfileRevision(revision => revision + 1)
-      reportAgentFlowEvent(credential.user, { event: 'user.registered', projectId: null, workspaceId: null, metadata: { method: 'email' } })
+      reportAgentFlowEvent(credential.user, registrationEvent(credential.user, 'password'))
     }), [run])
   const loginWithGoogle = useCallback(() => run(async () => {
     const credential = await firebaseLoginWithGoogle()
-    reportAgentFlowEvent(credential.user, { event: 'user.logged_in', projectId: null, workspaceId: null, metadata: { method: 'google' } })
+    const emission = getAdditionalUserInfo(credential)?.isNewUser
+      ? registrationEvent(credential.user, 'google.com')
+      : loginEvent('google.com')
+    reportAgentFlowEvent(credential.user, emission)
   }), [run])
   const signOut = useCallback(() => run(async () => {
     reportAgentFlowEvent(user, { event: 'user.logged_out', projectId: null, workspaceId: null, metadata: {} })

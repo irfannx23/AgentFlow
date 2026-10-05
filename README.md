@@ -107,7 +107,16 @@ Copy `.env.example` to `.env.local` and supply values for your environment. Neve
 ### AI providers
 
 - `GEMINI_MODEL` — default server model identifier
+- `GEMINI_ENDPOINT` — server-side Google Generative Language API root ending in `/models`
 - Provider API keys are added through Connections and encrypted at rest; they are not public environment variables.
+- AgentFlow BYOK connections call each provider directly from server route handlers; they do not pass through the backend-engine LiteLLM service.
+- Connection tests return safe categories (`authentication`, `model`, `endpoint`, `rate_limit`, `upstream`, `timeout`, `configuration`, `network`) and diagnostic codes without returning keys or raw provider bodies.
+
+### Production package validation
+
+Production generation persists the workflow, deployment guide, environment manifest, testing checklist, and architecture review independently, then validates the n8n export. Architecture Review combines deterministic graph/error-path checks with a structured AI-assisted review from the selected connected provider. Fenced JSON is accepted; malformed or incomplete structured output fails safely.
+
+Download is enabled only after all required artifacts, Architecture Review, the validated export, and ZIP inputs are ready. A failed Architecture Review can be retried independently; the other completed stages are not regenerated.
 
 ### PayU Test Mode
 

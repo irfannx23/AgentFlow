@@ -13,6 +13,8 @@ import {
 import { parseToolPlan, toolPlanFromAnswers, toolPlanIssues } from "@/lib/automation/tool-plan";
 import { configureWorkflowIntegrations } from "@/lib/integrations/intelligence/configure";
 import { integrationConfigurationIssues } from "@/lib/integrations/intelligence/validation";
+import { deterministicArchitectureIssues, parseArchitectureReview, renderArchitectureReview } from "@/lib/automation/architecture-review";
+import { ProviderError, normalizeProviderError } from "@/lib/ai/provider-errors";
 import type { Json } from "@/lib/supabase/types";
 import type { AIGenerationRequest } from "@/lib/ai/types";
 import type { ConnectionProvider } from "@/lib/connections/types";
@@ -32,7 +34,7 @@ const REQUIRED_ENVIRONMENT = [
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
   "CONNECTIONS_ENCRYPTION_KEY",
 ] as const;
-const OPTIONAL_ENVIRONMENT = ["GEMINI_MODEL"] as const;
+const OPTIONAL_ENVIRONMENT = ["GEMINI_MODEL", "GEMINI_ENDPOINT"] as const;
 const ROUTE_ENVIRONMENT = [
   ...REQUIRED_ENVIRONMENT,
   ...OPTIONAL_ENVIRONMENT,
@@ -50,6 +52,13 @@ class WorkflowValidationError extends Error {
       "The workflow generator returned invalid JSON after retry and repair.",
     );
     this.name = "WorkflowValidationError";
+  }
+}
+
+class ArchitectureReviewValidationError extends Error {
+  constructor(readonly issues: string[]) {
+    super('Architecture review identified issues that require attention.')
+    this.name = 'ArchitectureReviewValidationError'
   }
 }
 
@@ -106,6 +115,7 @@ function error(
 }
 
 function publicGenerationError(value: unknown) {
+  if (value instanceof ProviderError) return value.message;
   if (value instanceof DOMException && value.name === "TimeoutError")
     return "The AI provider timed out. Please try again.";
   const message = value instanceof Error ? value.message : "";
@@ -116,6 +126,16 @@ function publicGenerationError(value: unknown) {
   )
     return message;
   return "AgentFlow could not complete this request. Please try again.";
+}
+
+function publicGenerationFailure(value: unknown) {
+  const providerError = value instanceof ProviderError ? value : normalizeProviderError('AI provider', value)
+  return {
+    code: providerError.diagnosticCode,
+    category: providerError.category,
+    message: publicGenerationError(value),
+    stage: 'generation',
+  }
 }
 
 function parseWorkflow(text: string): {
@@ -895,7 +915,7 @@ export async function POST(request: Request) {
                 : task === "deployment"
                   ? "\nReturn only the deployment guide for the persisted workflow. Do not include environment variables, testing steps, architecture review, workflow JSON, or n8n JSON."
                   : task === "review"
-                    ? "\nReturn only the architecture review for the persisted internal workflow. Do not include deployment guidance, environment variables, testing checklists, workflow JSON, or n8n JSON."
+                    ? '\nReturn ONLY one JSON object shaped as {"verdict":"pass|needs_attention","summary":"","risks":[],"corrections":[]}. Review the persisted internal workflow architecture. Use needs_attention when a material issue remains. Do not include markdown, code fences, deployment guidance, environment variables, testing checklists, workflow JSON, or n8n JSON.'
                     : task === "requirements"
                       ? "\nReturn only the requested requirements JSON. Do not add markdown, commentary, or questions outside the JSON. Infer conventional automation defaults when they are safe, score every extracted field honestly, and reserve follow-up questions for missing decisions that would materially alter the workflow."
                       : task === "chat"
@@ -1232,12 +1252,15 @@ export async function POST(request: Request) {
       });
     }
     if (task === "review") {
-      if (!result.text.trim())
-        throw new Error(
-          "Architecture review generation returned empty content.",
-        );
+      const graph = workflowResult.data?.graph;
+      if (!graph || workflowValidationIssues(graph).length) throw new Error('Architecture review requires a valid persisted workflow.');
+      const review = parseArchitectureReview(result.text);
+      const deterministicIssues = deterministicArchitectureIssues(graph as WorkflowGraph);
+      if (deterministicIssues.length) throw new ArchitectureReviewValidationError(deterministicIssues);
       return NextResponse.json({
-        review: result.text.trim(),
+        review: renderArchitectureReview(review, deterministicIssues),
+        architectureReview: review,
+        deterministicIssues,
         citations,
         model: result.model,
         usage: result.usage,
@@ -1288,6 +1311,11 @@ export async function POST(request: Request) {
       { projectId, task, status: 200 },
     );
   } catch (generationError) {
+    if (generationError instanceof ArchitectureReviewValidationError) {
+      const errorId = newErrorId();
+      logLifecycle('error', 'architecture_review.validation_failed', { requestId: id, errorId, stage: 'architecture-review', elapsedMs: Math.round(performance.now() - routeStartedAt), error: generationError, missingEnvironmentVariables: missing, context: { projectId, issues: generationError.issues } });
+      return NextResponse.json({ error: { code: 'ARCHITECTURE_REVIEW_FAILED', category: 'architecture_review', message: generationError.message, stage: 'architecture-review', issues: generationError.issues, retryAttempted: false, errorId, requestId: id } }, { status: 422, headers: { 'x-request-id': id, 'x-error-id': errorId } });
+    }
     if (generationError instanceof WorkflowValidationError) {
       const errorId = newErrorId();
       logLifecycle("error", "workflow.validation_failed", {
@@ -1318,15 +1346,9 @@ export async function POST(request: Request) {
         },
       );
     }
-    return error(
-      publicGenerationError(generationError),
-      502,
-      id,
-      observedFailure.current?.stage ?? "generation",
-      generationError,
-      { projectId, providerId, model, failedStage: observedFailure.current?.stage ?? "generation" },
-      observedFailure.current?.errorId,
-      Math.round(performance.now() - routeStartedAt),
-    );
+    const failure = publicGenerationFailure(generationError);
+    const errorId = observedFailure.current?.errorId ?? newErrorId();
+    logLifecycle('error', 'intelligence.request_failed', { requestId: id, errorId, stage: observedFailure.current?.stage ?? 'generation', elapsedMs: Math.round(performance.now() - routeStartedAt), error: generationError, missingEnvironmentVariables: missing, context: { projectId, providerId, model, category: failure.category, diagnosticCode: failure.code } });
+    return NextResponse.json({ error: { ...failure, stage: observedFailure.current?.stage ?? 'generation', errorId, requestId: id } }, { status: 502, headers: { 'x-request-id': id, 'x-error-id': errorId } });
   }
 }
